@@ -20,7 +20,7 @@ from rclpy.qos import (
 )
 from sensor_msgs.msg import PointCloud2
 
-TOPIC = '/velodyne_points_wifi'
+TOPIC = os.environ.get('LIDAR_TOPIC', '/velodyne_points_wifi')
 
 # Match Pi WiFi republisher (BEST_EFFORT)
 WIFI_QOS = QoSProfile(
