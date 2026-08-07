@@ -19,7 +19,10 @@ typedef enum {
     MS_ACTION_MOVE,
     MS_ACTION_TEST_X,
     MS_ACTION_TEST_Y,
-    MS_ACTION_TEST_SIZE
+    MS_ACTION_TEST_SIZE,
+    MS_ACTION_PROBE_VDBOX,
+    MS_ACTION_SCAN_VDBOX,
+    MS_ACTION_TEST_BRIGHTNESS
 } ms_action_type;
 
 typedef struct {

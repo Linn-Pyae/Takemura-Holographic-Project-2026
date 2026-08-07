@@ -23,6 +23,105 @@ static void print_crop(const char *label, const ms_crop *crop)
            crop->width, crop->height, crop->x, crop->y);
 }
 
+static int probe_vdbox(ms_controller *controller)
+{
+    /*
+     * These addresses are either used by the original application or its
+     * Vdbox initialization file.  0x1f is deliberately excluded because it
+     * is used as the configuration apply/save trigger.
+     */
+    static const uint8_t addresses[] = {
+        0x05, 0x06, 0x07, 0x08, 0x0b, 0x0e, 0x0f,
+        0x20, 0x22, 0x23, 0x5a, 0x5c
+    };
+
+    puts("Vdbox register snapshot (read-only):");
+    for (size_t index = 0; index < sizeof(addresses) / sizeof(addresses[0]);
+         index++) {
+        uint32_t value;
+        uint8_t address = addresses[index];
+        if (ms_protocol_read(&controller->protocol, 0x01,
+                             controller->device_id, address, &value,
+                             controller->timeout_ms) != 0) {
+            fprintf(stderr, "  0x%02x: no response (%s)\n", address,
+                    ms_protocol_error());
+            continue;
+        }
+        printf("  0x%02x = 0x%08x (%u)\n", address, value, value);
+    }
+    return 0;
+}
+
+static int scan_vdbox(ms_controller *controller, uint8_t first, uint8_t last)
+{
+    unsigned int responses = 0;
+
+    printf("Vdbox read-only scan: 0x%02x-0x%02x\n", first, last);
+    for (unsigned int address = first; address <= last; address++) {
+        uint32_t value;
+        if (ms_protocol_read(&controller->protocol, 0x01,
+                             controller->device_id, (uint8_t)address, &value,
+                             controller->timeout_ms) == 0) {
+            printf("  0x%02x = 0x%08x (%u)\n", address, value, value);
+            responses++;
+        }
+    }
+    printf("Responsive addresses: %u\n", responses);
+    return 0;
+}
+
+static int test_vdbox_brightness(ms_controller *controller,
+                                 uint8_t requested, long duration)
+{
+    uint32_t original;
+    uint32_t actual;
+
+    if (ms_protocol_read(&controller->protocol, 0x01,
+                         controller->device_id, 0x22, &original,
+                         controller->timeout_ms) != 0) {
+        fprintf(stderr, "error: could not read Vdbox brightness: %s\n",
+                ms_protocol_error());
+        return 1;
+    }
+    if (original > 255u) {
+        fprintf(stderr, "error: Vdbox brightness is outside the expected range: %u\n",
+                original);
+        return 1;
+    }
+    if (ms_protocol_write(&controller->protocol, 0x01,
+                          controller->device_id, 0x22, requested) != 0 ||
+        ms_protocol_read(&controller->protocol, 0x01,
+                         controller->device_id, 0x22, &actual,
+                         controller->timeout_ms) != 0 || actual != requested) {
+        fprintf(stderr, "error: could not apply temporary Vdbox brightness: %s\n",
+                ms_protocol_error());
+        (void)ms_protocol_write(&controller->protocol, 0x01,
+                                controller->device_id, 0x22, original);
+        return 1;
+    }
+
+    printf("Temporary Vdbox brightness: %u (original: %u) for %ld seconds.\n",
+           requested, original, duration);
+    interrupted = 0;
+    signal(SIGINT, handle_signal);
+    signal(SIGTERM, handle_signal);
+    for (long elapsed = 0; elapsed < duration && !interrupted; elapsed++) {
+        ms_sleep_ms(1000);
+    }
+
+    if (ms_protocol_write(&controller->protocol, 0x01,
+                          controller->device_id, 0x22, original) != 0 ||
+        ms_protocol_read(&controller->protocol, 0x01,
+                         controller->device_id, 0x22, &actual,
+                         controller->timeout_ms) != 0 || actual != original) {
+        fprintf(stderr, "error: could not restore Vdbox brightness: %s\n",
+                ms_protocol_error());
+        return 1;
+    }
+    printf("Original Vdbox brightness restored: %u\n", original);
+    return 0;
+}
+
 static ms_crop target_crop(const ms_action *action,
                            const ms_controller_state *state)
 {
@@ -62,6 +161,9 @@ static ms_crop target_crop(const ms_action *action,
         target.height = side;
         break;
     case MS_ACTION_STATUS:
+    case MS_ACTION_PROBE_VDBOX:
+    case MS_ACTION_SCAN_VDBOX:
+    case MS_ACTION_TEST_BRIGHTNESS:
         break;
     }
     return target;
@@ -134,6 +236,26 @@ int main(int argc, char **argv)
         print_crop("Crop", &state.crop);
         ms_serial_close(serial);
         return 0;
+    }
+
+    if (action.type == MS_ACTION_PROBE_VDBOX) {
+        int result = probe_vdbox(&controller);
+        ms_serial_close(serial);
+        return result;
+    }
+
+    if (action.type == MS_ACTION_SCAN_VDBOX) {
+        int result = scan_vdbox(&controller, (uint8_t)action.x,
+                                (uint8_t)action.y);
+        ms_serial_close(serial);
+        return result;
+    }
+
+    if (action.type == MS_ACTION_TEST_BRIGHTNESS) {
+        int result = test_vdbox_brightness(&controller, (uint8_t)action.size,
+                                           action.duration);
+        ms_serial_close(serial);
+        return result;
     }
 
     ms_crop target = target_crop(&action, &state);

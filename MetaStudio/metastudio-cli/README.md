@@ -24,6 +24,9 @@ Commands:
   move DX DY                Move the current crop
   test x|y DELTA [SECONDS]  Temporarily move the crop
   test size SIZE [SECONDS]  Temporarily test a centered crop size
+  probe-vdbox               Read known Vdbox registers without changing them
+  scan-vdbox START END      Read an inclusive Vdbox address range
+  test-brightness VALUE [S] Temporarily change Vdbox brightness, then restore
   help [COMMAND]            Show help
 
 Options:
@@ -45,3 +48,17 @@ $ ./dist/metastudio-cli test x 200 5
 ```
 
 Use `--device /dev/ttyUSB0` if automatic detection does not select the correct serial port.
+
+## Read-only Vdbox probe
+
+Run `scripts/probe-vdbox.sh` to record the known Vdbox registers. It only sends
+register-read requests and does not change the device configuration.
+
+For a comparison-ready scan, run `scripts/capture-vdbox-snapshot.sh`. It scans
+`0x00` through `0x5f` by default and writes a timestamped file to
+`observations/`. Change one setting at a time, take another snapshot, then run
+`scripts/diff-vdbox-snapshots.sh BEFORE AFTER`.
+
+To visibly verify the known brightness register without persisting a change,
+run `scripts/test-vdbox-brightness.sh VALUE [SECONDS]`. The original value is
+read first and restored when the test ends or is interrupted with Ctrl+C.

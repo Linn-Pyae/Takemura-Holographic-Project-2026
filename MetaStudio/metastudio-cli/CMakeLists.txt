@@ -31,6 +31,8 @@ if(BUILD_TESTING)
   add_test(NAME cli-short-help COMMAND metastudio-cli -h)
   add_test(NAME cli-version COMMAND metastudio-cli --version)
   add_test(NAME cli-command-help COMMAND metastudio-cli set --help)
+  add_test(NAME cli-scan-help COMMAND metastudio-cli scan-vdbox --help)
+  add_test(NAME cli-brightness-help COMMAND metastudio-cli test-brightness --help)
 endif()
 
 include(GNUInstallDirs)

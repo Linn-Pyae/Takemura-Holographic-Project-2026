@@ -25,6 +25,9 @@ void ms_cli_print_help(void)
          "  move DX DY                Move the current crop\n"
          "  test x|y DELTA [SECONDS]  Temporarily move the crop\n"
          "  test size SIZE [SECONDS]  Temporarily test a centered crop size\n"
+         "  probe-vdbox               Read known Vdbox registers without changing them\n"
+         "  scan-vdbox START END      Read an inclusive Vdbox address range\n"
+         "  test-brightness VALUE [S] Temporarily change Vdbox brightness, then restore\n"
          "  help [COMMAND]            Show help\n"
          "\n"
          "Options:\n"
@@ -53,6 +56,17 @@ int ms_cli_print_command_help(const char *command)
         puts("Usage: metastudio-cli [options] test x|y DELTA [SECONDS]\n"
              "       metastudio-cli [options] test size SIZE [SECONDS]\n\n"
              "Apply a crop temporarily, then restore the original crop.");
+    } else if (strcmp(command, "probe-vdbox") == 0) {
+        puts("Usage: metastudio-cli [options] probe-vdbox\n\n"
+             "Read known Vdbox registers without changing device settings.");
+    } else if (strcmp(command, "scan-vdbox") == 0) {
+        puts("Usage: metastudio-cli [options] scan-vdbox START END\n\n"
+             "Read the inclusive hexadecimal Vdbox address range without\n"
+             "changing device settings.");
+    } else if (strcmp(command, "test-brightness") == 0) {
+        puts("Usage: metastudio-cli [options] test-brightness VALUE [SECONDS]\n\n"
+             "Temporarily set Vdbox brightness (0 through 255), then restore\n"
+             "the original value. The default duration is 10 seconds.");
     } else {
         fprintf(stderr, "error: unknown command '%s'\n", command);
         return -1;
@@ -161,6 +175,35 @@ int ms_cli_prepare_action(const ms_cli_arguments *arguments,
             return -1;
         }
         prepared->type = MS_ACTION_STATUS;
+    } else if (strcmp(command, "probe-vdbox") == 0) {
+        if (count != 0) {
+            fprintf(stderr, "error: 'probe-vdbox' does not accept arguments\n");
+            return -1;
+        }
+        prepared->type = MS_ACTION_PROBE_VDBOX;
+    } else if (strcmp(command, "scan-vdbox") == 0) {
+        if (count != 2 ||
+            parse_long(arguments->operands[0], 0, 255, &prepared->x) != 0 ||
+            parse_long(arguments->operands[1], 0, 255, &prepared->y) != 0 ||
+            prepared->x > prepared->y) {
+            fprintf(stderr,
+                    "error: usage: scan-vdbox START END (0x00 through 0xff)\n");
+            return -1;
+        }
+        prepared->type = MS_ACTION_SCAN_VDBOX;
+    } else if (strcmp(command, "test-brightness") == 0) {
+        if ((count != 1 && count != 2) ||
+            parse_long(arguments->operands[0], 0, 255, &prepared->size) != 0 ||
+            (count == 2 &&
+             parse_long(arguments->operands[1], 1, 60, &prepared->duration) != 0)) {
+            fprintf(stderr,
+                    "error: usage: test-brightness VALUE [SECONDS]\n");
+            return -1;
+        }
+        if (count == 1) {
+            prepared->duration = 10;
+        }
+        prepared->type = MS_ACTION_TEST_BRIGHTNESS;
     } else if (strcmp(command, "center") == 0) {
         if (count != 0) {
             fprintf(stderr, "error: 'center' does not accept arguments\n");
