@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "QNoyBqNFRDM=",
+  "success": true,
+  "projectFilePath": "/home/poyu0/Project/Takemura-Holographic-Project-2026/MetaStudio/decompiled-capture/CaptureImageTool.csproj",
+  "expectedPackageFiles": [
+    "/home/poyu0/.nuget/packages/microsoft.netframework.referenceassemblies/1.0.3/microsoft.netframework.referenceassemblies.1.0.3.nupkg.sha512",
+    "/home/poyu0/.nuget/packages/microsoft.netframework.referenceassemblies.net45/1.0.3/microsoft.netframework.referenceassemblies.net45.1.0.3.nupkg.sha512"
+  ],
+  "logs": []
+}
