@@ -16,13 +16,21 @@ cmake --build build --parallel
 ./build/renderer
 ```
 
-The current renderer runs a temporary closed movement track and retains six
-seconds of fading, alternating footprints. The supplied right-foot PNG is
-mirrored at draw time for left steps and rotated to the direction of travel.
+The current renderer moves two temporary subjects around a closed track in
+opposite directions. Footprints are placed by distance travelled rather than
+elapsed time, so their spacing stays constant when movement speed changes.
+The step distance is configured by `kFootprintStepDistance` in `src/main.cpp`
+and defaults to 0.42 m. Each subject owns an independent three-second trail.
+Its opacity uses a smoothstep curve: it holds near full strength at first,
+fades rapidly through the middle, then reaches zero smoothly. The supplied
+right-foot PNG is mirrored at draw time for left steps and rotated to the
+direction of travel.
 The parchment `assets/textures/bg.png` is drawn behind the scene with its
 aspect ratio preserved and cropped as needed to cover the whole window.
 Press Space to pause, R to reset, and Escape to quit. IPC integration will
 replace the temporary track data later.
+The renderer intentionally has no top-left debug overlay; only the subject
+labels and a temporary `Paused` indicator are drawn over the map.
 
 The UI uses IM FELL English Pro from `assets/fonts/`. Its SIL Open Font License
 is distributed alongside the regular and italic font files. CMake copies the

@@ -1,5 +1,6 @@
 #include <raylib.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -12,11 +13,13 @@ constexpr int kInitialWidth = 1280;
 constexpr int kInitialHeight = 720;
 constexpr float kPixelsPerMeter = 72.0F;
 constexpr float kSecondsPerSegment = 1.15F;
-constexpr float kTrailSampleInterval = 0.24F;
-constexpr float kTrailLifetime = 6.0F;
+constexpr float kTrailLifetime = 3.0F;
+// Distance travelled between footprints, in scene-space meters.
+constexpr float kFootprintStepDistance = 0.42F;
 constexpr int kFontAtlasSize = 64;
 constexpr float kFootprintLateralOffset = 0.11F;
 constexpr float kFootprintSize = 0.42F;
+constexpr float kPersonLabelFontSize = 0.32F;
 
 // Temporary closed track in scene-space meters. Replace this with accepted
 // PersonUpdate positions once the IPC receiver is connected to the render loop.
@@ -40,6 +43,30 @@ struct TrailPoint {
     float rotation = 0.0F;
     float age = 0.0F;
     bool right_foot = true;
+};
+
+struct DemoPerson {
+    DemoPerson(
+        const char* person_name,
+        float offset_seconds,
+        float speed,
+        Color color)
+        : name(person_name),
+          track_offset_seconds(offset_seconds),
+          track_speed(speed),
+          ink(color) {}
+
+    const char* name = "";
+    float track_offset_seconds = 0.0F;
+    float track_speed = 1.0F;
+    Color ink{};
+
+    Vector2 position{};
+    float distance_since_last_footprint = 0.0F;
+    Vector2 previous_position{};
+    bool has_previous_position = false;
+    bool next_is_right_foot = true;
+    std::deque<TrailPoint> trail;
 };
 
 std::string assetPath(const char* relative_path) {
@@ -86,13 +113,21 @@ Vector2 sampleDemoTrack(float elapsed_seconds) {
         t);
 }
 
+float trailOpacity(float age) {
+    const float progress =
+        std::clamp(age / kTrailLifetime, 0.0F, 1.0F);
+    const float eased = progress * progress * (3.0F - 2.0F * progress);
+    return 1.0F - eased;
+}
+
 void updateTrail(
     std::deque<TrailPoint>& trail,
     Vector2 person_position,
     float dt,
-    float& sample_accumulator,
-    Vector2& previous_sample_position,
-    bool& has_previous_sample,
+    float step_distance,
+    float& distance_since_last_footprint,
+    Vector2& previous_position,
+    bool& has_previous_position,
     bool& next_is_right_foot) {
     for (TrailPoint& point : trail) {
         point.age += dt;
@@ -101,40 +136,54 @@ void updateTrail(
         trail.pop_front();
     }
 
-    sample_accumulator += dt;
-    while (sample_accumulator >= kTrailSampleInterval) {
-        Vector2 direction{0.0F, -1.0F};
-        if (has_previous_sample) {
-            direction = {
-                person_position.x - previous_sample_position.x,
-                person_position.y - previous_sample_position.y,
-            };
-            const float length =
-                std::sqrt(direction.x * direction.x + direction.y * direction.y);
-            if (length > 0.0001F) {
-                direction.x /= length;
-                direction.y /= length;
-            }
-        }
+    if (!has_previous_position) {
+        previous_position = person_position;
+        has_previous_position = true;
+        return;
+    }
+
+    Vector2 direction{
+        person_position.x - previous_position.x,
+        person_position.y - previous_position.y,
+    };
+    float remaining_distance =
+        std::sqrt(direction.x * direction.x + direction.y * direction.y);
+    if (remaining_distance <= 0.0001F) {
+        previous_position = person_position;
+        return;
+    }
+
+    direction.x /= remaining_distance;
+    direction.y /= remaining_distance;
+    Vector2 cursor = previous_position;
+    float distance_to_next =
+        step_distance - distance_since_last_footprint;
+
+    while (remaining_distance + 0.0001F >= distance_to_next) {
+        cursor.x += direction.x * distance_to_next;
+        cursor.y += direction.y * distance_to_next;
 
         // In screen-style coordinates (+Y is down), this is the walker's
         // right-hand perpendicular to the direction of travel.
         const Vector2 right{-direction.y, direction.x};
         const float side = next_is_right_foot ? 1.0F : -1.0F;
         const Vector2 footprint_position{
-            person_position.x + right.x * kFootprintLateralOffset * side,
-            person_position.y + right.y * kFootprintLateralOffset * side,
+            cursor.x + right.x * kFootprintLateralOffset * side,
+            cursor.y + right.y * kFootprintLateralOffset * side,
         };
         const float rotation =
             std::atan2(direction.y, direction.x) * RAD2DEG + 90.0F;
 
         trail.push_back(
             {footprint_position, rotation, 0.0F, next_is_right_foot});
-        previous_sample_position = person_position;
-        has_previous_sample = true;
         next_is_right_foot = !next_is_right_foot;
-        sample_accumulator -= kTrailSampleInterval;
+        remaining_distance -= distance_to_next;
+        distance_since_last_footprint = 0.0F;
+        distance_to_next = step_distance;
     }
+
+    distance_since_last_footprint += remaining_distance;
+    previous_position = person_position;
 }
 
 void drawMapBackground() {
@@ -193,7 +242,7 @@ void drawFallbackTrail(const std::deque<TrailPoint>& trail) {
     for (std::size_t index = 1; index < trail.size(); ++index) {
         const TrailPoint& previous = trail[index - 1];
         const TrailPoint& current = trail[index];
-        const float opacity = 1.0F - current.age / kTrailLifetime;
+        const float opacity = trailOpacity(current.age);
 
         DrawLineEx(previous.position, current.position, 0.07F,
                    Fade(ink, opacity * 0.55F));
@@ -210,7 +259,7 @@ void drawFootprints(
     }
 
     for (const TrailPoint& footprint : trail) {
-        const float opacity = 1.0F - footprint.age / kTrailLifetime;
+        const float opacity = trailOpacity(footprint.age);
         Rectangle source{
             0.0F,
             0.0F,
@@ -234,15 +283,14 @@ void drawFootprints(
     }
 }
 
-void drawPerson(Vector2 position, Font font) {
-    constexpr Color ink{88, 38, 32, 255};
+void drawPerson(Vector2 position, const char* name, Color ink, Font font) {
     DrawCircleV(position, 0.24F, Fade(ink, 0.18F));
     DrawCircleLinesV(position, 0.18F, ink);
     DrawCircleV(position, 0.075F, ink);
 
-    DrawTextEx(font, "Demo Person",
-               {position.x + 0.28F, position.y - 0.28F},
-               0.22F, 0.015F, ink);
+    DrawTextEx(font, name,
+               {position.x + 0.30F, position.y - 0.34F},
+               kPersonLabelFontSize, 0.018F, ink);
 }
 
 }  // namespace
@@ -303,13 +351,13 @@ int main() {
     camera.rotation = 0.0F;
     camera.zoom = kPixelsPerMeter;
 
-    float demo_time = 0.0F;
-    float trail_sample_accumulator = kTrailSampleInterval;
     bool paused = false;
-    bool has_previous_sample = false;
-    bool next_is_right_foot = true;
-    Vector2 previous_sample_position{};
-    std::deque<TrailPoint> trail;
+    float demo_time = 0.0F;
+    std::array<DemoPerson, 2> demo_people{{
+        {"Demo Person A", 0.0F, 1.0F, Color{88, 38, 32, 255}},
+        {"Demo Person B", kSecondsPerSegment * 5.0F, -0.82F,
+         Color{42, 62, 73, 255}},
+    }};
 
     while (!WindowShouldClose()) {
         if (IsKeyPressed(KEY_SPACE)) {
@@ -317,18 +365,26 @@ int main() {
         }
         if (IsKeyPressed(KEY_R)) {
             demo_time = 0.0F;
-            trail_sample_accumulator = kTrailSampleInterval;
-            trail.clear();
-            has_previous_sample = false;
-            next_is_right_foot = true;
+            for (DemoPerson& person : demo_people) {
+                person.distance_since_last_footprint = 0.0F;
+                person.trail.clear();
+                person.has_previous_position = false;
+                person.next_is_right_foot = true;
+            }
         }
 
         const float dt = paused ? 0.0F : GetFrameTime();
         demo_time += dt;
-        const Vector2 person_position = sampleDemoTrack(demo_time);
-        updateTrail(trail, person_position, dt, trail_sample_accumulator,
-                    previous_sample_position, has_previous_sample,
-                    next_is_right_foot);
+        for (DemoPerson& person : demo_people) {
+            person.position = sampleDemoTrack(
+                person.track_offset_seconds + demo_time * person.track_speed);
+            updateTrail(person.trail, person.position, dt,
+                        kFootprintStepDistance,
+                        person.distance_since_last_footprint,
+                        person.previous_position,
+                        person.has_previous_position,
+                        person.next_is_right_foot);
+        }
 
         camera.offset = {
             GetScreenWidth() * 0.5F,
@@ -341,30 +397,20 @@ int main() {
 
         BeginMode2D(camera);
         drawMapBackground();
-        drawFootprints(trail, footprint_texture);
-        drawPerson(person_position, italic_font);
+        for (const DemoPerson& person : demo_people) {
+            drawFootprints(person.trail, footprint_texture);
+        }
+        for (const DemoPerson& person : demo_people) {
+            drawPerson(person.position, person.name, person.ink, italic_font);
+        }
         EndMode2D();
 
-        DrawTextEx(regular_font, "Temporary Track + 6 Second Trail",
-                   {24.0F, 18.0F}, 27.0F, 1.0F,
-                   Color{68, 48, 35, 255});
-        DrawTextEx(regular_font, "Space: pause    R: reset    Esc: quit",
-                   {25.0F, 53.0F}, 19.0F, 0.7F,
-                   Color{99, 76, 53, 255});
-        DrawTextEx(regular_font,
-                   TextFormat("Footprints: %d", static_cast<int>(trail.size())),
-                   {25.0F, 78.0F}, 19.0F, 0.7F,
-                   Color{99, 76, 53, 255});
         if (paused) {
             DrawTextEx(regular_font, "Paused",
                        {static_cast<float>(GetScreenWidth() - 110), 22.0F},
                        22.0F, 0.8F, Color{88, 38, 32, 255});
         }
 
-        DrawTextEx(regular_font, TextFormat("%d FPS", GetFPS()),
-                   {static_cast<float>(GetScreenWidth() - 82),
-                    static_cast<float>(GetScreenHeight() - 34)},
-                   18.0F, 0.6F, Color{70, 105, 55, 255});
         EndDrawing();
     }
 
