@@ -10,10 +10,15 @@ person_cluster (C++)  →  /person_detections  (PoseArray centroids)
         │
         ▼
 person_tracker (Python) →  /person_tracks     (PoseArray tracked poses)
+        │                 →  /person_tracks_info (JSON labels)
+        ▼
+renderer_bridge (C++)  →  Unix socket (/tmp/takemura-renderer.sock)
         │
         ▼
-viz_node (matplotlib) →  2D map with trails
+map_renderer (raylib) →  footprint map GUI (Mac window or Pi HDMI)
 ```
+
+Optional debug GUI: `viz_node` (matplotlib 2D) via `run_bag_pipeline.sh`.
 
 Ship this folder (`project_ws`) plus a recorded bag (or live cloud on the remapped topic). Offline simulation benchmarks stay in the repo-root `tracking/` package; runtime MOT used by ROS lives in `person_tracker/person_tracker/mot/`.
 
@@ -21,12 +26,15 @@ Ship this folder (`project_ws`) plus a recorded bag (or live cloud on the remapp
 
 ```text
 project_ws/
-  scripts/run_bag_pipeline.sh   # bag + cluster + track + 2D map
+  scripts/run_bag_map.sh          # live or bag + footprint map only
+  scripts/run_bag_map_both.sh     # live or bag + Open3D 3D + footprint map
+  scripts/run_bag_pipeline.sh   # bag + cluster + track + matplotlib 2D map
   scripts/run_bag_view3d.sh     # bag + Open3D (OpenGL) raw cloud view
   scripts/run_bag_both.sh       # bag + cluster + track + Open3D + 2D map
   src/
-    person_cluster/             # C++ Euclidean clustering
+    person_cluster/             # C++ LiDAR clustering
     person_tracker/             # Python ROS node + MOT core + 2D viz
+    renderer_bridge/            # C++ ROS -> map_renderer Unix socket
   build/ install/ log/          # created by colcon (gitignored)
 ```
 
@@ -63,6 +71,41 @@ source install/setup.zsh
 ```
 
 ## Run (recommended)
+
+### Footprint map (Mac dev or Pi HDMI)
+
+From `project_ws`:
+
+```bash
+./scripts/run_bag_map.sh                     # Mac + LIVE /velodyne_points (footprint map only)
+./scripts/run_bag_map_both.sh                # Mac + LIVE + Open3D 3D + footprint map
+./scripts/run_bag_map_both.sh mac lidar_sample   # Mac + bag + both GUIs
+./scripts/run_bag_map.sh mac lidar_sample    # Mac + recorded bag (map only)
+./scripts/run_bag_map_both.sh pi             # Pi + LIVE + both GUIs + HDMI
+LIVE_LIDAR_TOPIC=/velodyne_points_wifi ./scripts/run_bag_map_both.sh
+```
+
+Default is **live LiDAR** on `/velodyne_points` (override with `LIVE_LIDAR_TOPIC`).
+Pass a bag name only when you want recorded replay.
+
+Mac uses `micromamba activate ros_view`. Pi sources `ROS_UNDERLAY` (default
+`/opt/ros/jazzy/setup.bash`) and sets `DISPLAY=:0` for HDMI output.
+
+Build `map_renderer` once before first run:
+
+```bash
+cd ../map_renderer
+cmake -S . -B build && cmake --build build
+```
+
+Build `renderer_bridge` after adding it:
+
+```bash
+colcon build --packages-select renderer_bridge
+source install/setup.zsh   # or setup.bash on Pi
+```
+
+### Matplotlib debug map
 
 From `project_ws` (expects bag next to the parent repo, e.g. `../lidar_sample`):
 

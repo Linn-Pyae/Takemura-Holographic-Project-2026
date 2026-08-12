@@ -9,7 +9,7 @@
 int main() {
     const mapipc::PersonUpdate original{
         42, 123.5F, -9.25F, 0x0102'0304'0506'0708ULL,
-        1'700'000'000'123'456'789LL};
+        1'700'000'000'123'456'789LL, "HERMIONE"};
     const mapipc::PersonPacketBytes bytes =
         mapipc::serializePersonPacket(original);
 
@@ -18,6 +18,9 @@ int main() {
     assert(bytes[13] == 0x02);
     assert(bytes[18] == 0x07);
     assert(bytes[19] == 0x08);
+    assert(bytes[28] == 'H');
+    assert(bytes[35] == 'E');
+    assert(bytes[36] == 0);
 
     std::string error;
     const auto parsed =
@@ -29,12 +32,13 @@ int main() {
     assert(parsed->y == original.y);
     assert(parsed->sequence == original.sequence);
     assert(parsed->timestamp == original.timestamp);
+    assert(parsed->name == original.name);
 
     assert(!mapipc::parsePersonPacket(bytes.data(), bytes.size() - 1, &error));
     assert(!error.empty());
 
     const mapipc::PersonUpdate invalid{
-        1, std::numeric_limits<float>::quiet_NaN(), 2.0F, 3, 4};
+        1, std::numeric_limits<float>::quiet_NaN(), 2.0F, 3, 4, "X"};
     const auto invalid_bytes = mapipc::serializePersonPacket(invalid);
     assert(!mapipc::parsePersonPacket(
         invalid_bytes.data(), invalid_bytes.size(), &error));

@@ -24,25 +24,20 @@
 
 using std::placeholders::_1;
 
-namespace
-{
+namespace {
 
-struct VoxelKey
-{
+struct VoxelKey {
   int32_t x{0};
   int32_t y{0};
   int32_t z{0};
 
-  bool operator==(const VoxelKey & other) const
-  {
+  bool operator==(const VoxelKey &other) const {
     return x == other.x && y == other.y && z == other.z;
   }
 };
 
-struct VoxelKeyHash
-{
-  std::size_t operator()(const VoxelKey & key) const noexcept
-  {
+struct VoxelKeyHash {
+  std::size_t operator()(const VoxelKey &key) const noexcept {
     std::size_t h = static_cast<std::size_t>(key.x) * 73856093u;
     h ^= static_cast<std::size_t>(key.y) * 19349663u;
     h ^= static_cast<std::size_t>(key.z) * 83492791u;
@@ -50,22 +45,20 @@ struct VoxelKeyHash
   }
 };
 
-struct ClusterShape
-{
+struct ClusterShape {
   float cx{0.0f};
   float cy{0.0f};
   float cz{0.0f};
-  float width{0.0f};        // horizontal footprint diagonal [m]
-  float height{0.0f};       // vertical extent [m]
-  float range{0.0f};        // horizontal distance from sensor [m]
-  float verticality{0.0f};  // |principal axis . z|, 1.0 = upright
+  float width{0.0f};       // horizontal footprint diagonal [m]
+  float height{0.0f};      // vertical extent [m]
+  float range{0.0f};       // horizontal distance from sensor [m]
+  float verticality{0.0f}; // |principal axis . z|, 1.0 = upright
   std::size_t points{0};
 };
 
 /// A blob that has been seen for a while, used to tell walkers from
 /// static objects that flicker in and out of the background model.
-struct Candidate
-{
+struct Candidate {
   float x{0.0f};
   float y{0.0f};
   float z{0.0f};
@@ -78,9 +71,9 @@ constexpr float kFloorBinSize = 0.05f;
 constexpr float kFloorRangeMin = -5.0f;
 constexpr float kFloorRangeMax = 5.0f;
 constexpr std::size_t kFloorBins =
-  static_cast<std::size_t>((kFloorRangeMax - kFloorRangeMin) / kFloorBinSize);
+    static_cast<std::size_t>((kFloorRangeMax - kFloorRangeMin) / kFloorBinSize);
 
-}  // namespace
+} // namespace
 
 /**
  * Detect walking people in a Velodyne cloud.
@@ -98,12 +91,9 @@ constexpr std::size_t kFloorBins =
  * 6) Motion memory: a blob is only published once it has actually travelled,
  *    with a hold time so a person who pauses is not dropped instantly.
  */
-class PersonClusterNode : public rclcpp::Node
-{
+class PersonClusterNode : public rclcpp::Node {
 public:
-  PersonClusterNode()
-  : Node("person_cluster_node")
-  {
+  PersonClusterNode() : Node("person_cluster_node") {
     auto_floor_ = declare_parameter<bool>("auto_floor", true);
     floor_z_ = declare_parameter<double>("floor_z", -0.85);
     z_offset_min_ = declare_parameter<double>("z_offset_min", 0.30);
@@ -128,8 +118,10 @@ public:
     max_width_m_ = declare_parameter<double>("max_width_m", 1.00);
     min_aspect_ratio_ = declare_parameter<double>("min_aspect_ratio", 0.90);
     min_verticality_ = declare_parameter<double>("min_verticality", 0.45);
-    verticality_min_points_ = declare_parameter<int>("verticality_min_points", 12);
-    points_at_one_meter_ = declare_parameter<double>("points_at_one_meter", 45.0);
+    verticality_min_points_ =
+        declare_parameter<int>("verticality_min_points", 12);
+    points_at_one_meter_ =
+        declare_parameter<double>("points_at_one_meter", 45.0);
     min_points_floor_ = declare_parameter<int>("min_points_floor", 5);
 
     assoc_radius_ = declare_parameter<double>("assoc_radius", 0.70);
@@ -143,38 +135,40 @@ public:
 
     auto qos = rclcpp::SensorDataQoS();
     sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
-      "/velodyne_points_bag", qos,
-      std::bind(&PersonClusterNode::cloud_cb, this, _1));
-    pub_ = create_publisher<geometry_msgs::msg::PoseArray>("/person_detections", 10);
+        "/velodyne_points_bag", qos,
+        std::bind(&PersonClusterNode::cloud_cb, this, _1));
+    pub_ = create_publisher<geometry_msgs::msg::PoseArray>("/person_detections",
+                                                           10);
 
     floor_hist_.assign(kFloorBins, 0);
 
     RCLCPP_INFO(
-      get_logger(),
-      "person clusterer ready (floor_frames=%d, warmup=%d, bg_alpha=%.3f, "
-      "static>=%.2f, motion=%s, gate h=[%.2f,%.2f] w<=%.2f)",
-      floor_frames_, warmup_frames_, bg_alpha_, static_threshold_,
-      require_motion_ ? "on" : "off", min_height_m_, max_height_m_, max_width_m_);
+        get_logger(),
+        "person clusterer ready (floor_frames=%d, warmup=%d, bg_alpha=%.3f, "
+        "static>=%.2f, motion=%s, gate h=[%.2f,%.2f] w<=%.2f)",
+        floor_frames_, warmup_frames_, bg_alpha_, static_threshold_,
+        require_motion_ ? "on" : "off", min_height_m_, max_height_m_,
+        max_width_m_);
   }
 
 private:
-  VoxelKey to_key(float x, float y, float z) const
-  {
+  VoxelKey to_key(float x, float y, float z) const {
     const float inv = static_cast<float>(1.0 / bg_voxel_size_);
     return VoxelKey{
-      static_cast<int32_t>(std::floor(x * inv)),
-      static_cast<int32_t>(std::floor(y * inv)),
-      static_cast<int32_t>(std::floor(z * inv)),
+        static_cast<int32_t>(std::floor(x * inv)),
+        static_cast<int32_t>(std::floor(y * inv)),
+        static_cast<int32_t>(std::floor(z * inv)),
     };
   }
 
-  void accumulate_floor_hist(const pcl::PointCloud<pcl::PointXYZ> & cloud)
-  {
-    for (const auto & pt : cloud.points) {
-      if (!std::isfinite(pt.z) || pt.z < kFloorRangeMin || pt.z >= kFloorRangeMax) {
+  void accumulate_floor_hist(const pcl::PointCloud<pcl::PointXYZ> &cloud) {
+    for (const auto &pt : cloud.points) {
+      if (!std::isfinite(pt.z) || pt.z < kFloorRangeMin ||
+          pt.z >= kFloorRangeMax) {
         continue;
       }
-      const auto bin = static_cast<std::size_t>((pt.z - kFloorRangeMin) / kFloorBinSize);
+      const auto bin =
+          static_cast<std::size_t>((pt.z - kFloorRangeMin) / kFloorBinSize);
       if (bin < floor_hist_.size()) {
         ++floor_hist_[bin];
       }
@@ -184,8 +178,7 @@ private:
   }
 
   /// The floor is the densest horizontal slab in the lower half of the scene.
-  void estimate_floor()
-  {
+  void estimate_floor() {
     if (!auto_floor_ || floor_seen_max_ <= floor_seen_min_) {
       return;
     }
@@ -193,7 +186,8 @@ private:
     std::size_t best_bin = 0;
     long best_count = -1;
     for (std::size_t i = 0; i < floor_hist_.size(); ++i) {
-      const float z = kFloorRangeMin + (static_cast<float>(i) + 0.5f) * kFloorBinSize;
+      const float z =
+          kFloorRangeMin + (static_cast<float>(i) + 0.5f) * kFloorBinSize;
       if (z >= midpoint) {
         break;
       }
@@ -203,29 +197,30 @@ private:
       }
     }
     if (best_count > 0) {
-      floor_z_ = kFloorRangeMin + (static_cast<float>(best_bin) + 0.5f) * kFloorBinSize;
+      floor_z_ = kFloorRangeMin +
+                 (static_cast<float>(best_bin) + 0.5f) * kFloorBinSize;
     }
-    RCLCPP_INFO(
-      get_logger(), "floor estimated at z=%.2f -> height band %.2f..%.2f",
-      floor_z_, floor_z_ + z_offset_min_, floor_z_ + z_offset_max_);
+    RCLCPP_INFO(get_logger(),
+                "floor estimated at z=%.2f -> height band %.2f..%.2f", floor_z_,
+                floor_z_ + z_offset_min_, floor_z_ + z_offset_max_);
   }
 
-  pcl::PointCloud<pcl::PointXYZ>::Ptr preprocess(
-    const pcl::PointCloud<pcl::PointXYZ>::Ptr & cloud) const
-  {
+  pcl::PointCloud<pcl::PointXYZ>::Ptr
+  preprocess(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud) const {
     pcl::PassThrough<pcl::PointXYZ> pass;
     pass.setInputCloud(cloud);
     pass.setFilterFieldName("z");
-    pass.setFilterLimits(
-      static_cast<float>(floor_z_ + z_offset_min_),
-      static_cast<float>(floor_z_ + z_offset_max_));
-    pcl::PointCloud<pcl::PointXYZ>::Ptr band(new pcl::PointCloud<pcl::PointXYZ>);
+    pass.setFilterLimits(static_cast<float>(floor_z_ + z_offset_min_),
+                         static_cast<float>(floor_z_ + z_offset_max_));
+    pcl::PointCloud<pcl::PointXYZ>::Ptr band(
+        new pcl::PointCloud<pcl::PointXYZ>);
     pass.filter(*band);
 
-    pcl::PointCloud<pcl::PointXYZ>::Ptr near(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr near(
+        new pcl::PointCloud<pcl::PointXYZ>);
     near->reserve(band->size());
     const float max_r2 = static_cast<float>(max_range_ * max_range_);
-    for (const auto & pt : band->points) {
+    for (const auto &pt : band->points) {
       if (pt.x * pt.x + pt.y * pt.y <= max_r2) {
         near->push_back(pt);
       }
@@ -238,17 +233,18 @@ private:
     vg.setInputCloud(near);
     const float leaf = static_cast<float>(leaf_size_);
     vg.setLeafSize(leaf, leaf, leaf);
-    pcl::PointCloud<pcl::PointXYZ>::Ptr down(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr down(
+        new pcl::PointCloud<pcl::PointXYZ>);
     vg.filter(*down);
     return down;
   }
 
   /// Occupied voxels decay towards 1.0, unobserved ones towards 0.0.
-  void update_background(
-    const std::unordered_set<VoxelKey, VoxelKeyHash> & occupied, double alpha)
-  {
-    for (const auto & key : occupied) {
-      auto & score = background_[key];
+  void
+  update_background(const std::unordered_set<VoxelKey, VoxelKeyHash> &occupied,
+                    double alpha) {
+    for (const auto &key : occupied) {
+      auto &score = background_[key];
       score = score * (1.0 - alpha) + alpha;
     }
     for (auto it = background_.begin(); it != background_.end();) {
@@ -263,27 +259,24 @@ private:
     }
   }
 
-  bool is_static(const VoxelKey & key) const
-  {
+  bool is_static(const VoxelKey &key) const {
     const auto it = background_.find(key);
     return it != background_.end() && it->second >= static_threshold_;
   }
 
-  ClusterShape measure(
-    const pcl::PointCloud<pcl::PointXYZ> & cloud,
-    const pcl::PointIndices & indices) const
-  {
+  ClusterShape measure(const pcl::PointCloud<pcl::PointXYZ> &cloud,
+                       const pcl::PointIndices &indices) const {
     ClusterShape shape;
     shape.points = indices.indices.size();
 
-    const auto & first = cloud[indices.indices.front()];
+    const auto &first = cloud[indices.indices.front()];
     float min_x = first.x, max_x = first.x;
     float min_y = first.y, max_y = first.y;
     float min_z = first.z, max_z = first.z;
     double sx = 0.0, sy = 0.0, sz = 0.0;
 
     for (const int idx : indices.indices) {
-      const auto & pt = cloud[idx];
+      const auto &pt = cloud[idx];
       min_x = std::min(min_x, pt.x);
       max_x = std::max(max_x, pt.x);
       min_y = std::min(min_y, pt.y);
@@ -309,22 +302,23 @@ private:
     if (shape.points >= static_cast<std::size_t>(verticality_min_points_)) {
       Eigen::Vector4f centroid;
       Eigen::Matrix3f covariance;
-      pcl::computeMeanAndCovarianceMatrix(cloud, indices.indices, covariance, centroid);
+      pcl::computeMeanAndCovarianceMatrix(cloud, indices.indices, covariance,
+                                          centroid);
       Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> solver(covariance);
       // Eigenvalues come out ascending, so the last vector is the long axis.
       shape.verticality = std::abs(solver.eigenvectors().col(2).z());
     } else {
-      shape.verticality = 1.0f;  // too sparse to judge orientation
+      shape.verticality = 1.0f; // too sparse to judge orientation
     }
 
     return shape;
   }
 
-  bool looks_human(const ClusterShape & shape) const
-  {
+  bool looks_human(const ClusterShape &shape) const {
     const double r = std::max(1.0, static_cast<double>(shape.range));
-    const int needed = std::max(
-      min_points_floor_, static_cast<int>(std::lround(points_at_one_meter_ / r)));
+    const int needed =
+        std::max(min_points_floor_,
+                 static_cast<int>(std::lround(points_at_one_meter_ / r)));
     if (static_cast<int>(shape.points) < needed) {
       return false;
     }
@@ -342,18 +336,19 @@ private:
 
   /// Match shaped blobs to persistent candidates and report the ones that
   /// have travelled far enough recently to be a walking person.
-  std::vector<Candidate *> track_motion(const std::vector<ClusterShape> & shapes)
-  {
+  std::vector<Candidate *>
+  track_motion(const std::vector<ClusterShape> &shapes) {
     std::vector<bool> taken(candidates_.size(), false);
 
-    for (const auto & shape : shapes) {
+    for (const auto &shape : shapes) {
       int best = -1;
       double best_d = assoc_radius_;
       for (std::size_t i = 0; i < candidates_.size(); ++i) {
         if (taken[i]) {
           continue;
         }
-        const double d = std::hypot(shape.cx - candidates_[i].x, shape.cy - candidates_[i].y);
+        const double d = std::hypot(shape.cx - candidates_[i].x,
+                                    shape.cy - candidates_[i].y);
         if (d < best_d) {
           best_d = d;
           best = static_cast<int>(i);
@@ -369,7 +364,7 @@ private:
         candidates_.push_back(std::move(c));
         taken.push_back(true);
       } else {
-        Candidate & c = candidates_[static_cast<std::size_t>(best)];
+        Candidate &c = candidates_[static_cast<std::size_t>(best)];
         c.x = shape.cx;
         c.y = shape.cy;
         c.z = shape.cz;
@@ -387,25 +382,24 @@ private:
         ++candidates_[i].unseen;
       }
     }
-    candidates_.erase(
-      std::remove_if(
-        candidates_.begin(), candidates_.end(),
-        [this](const Candidate & c) {return c.unseen > drop_frames_;}),
-      candidates_.end());
+    candidates_.erase(std::remove_if(candidates_.begin(), candidates_.end(),
+                                     [this](const Candidate &c) {
+                                       return c.unseen > drop_frames_;
+                                     }),
+                      candidates_.end());
 
     std::vector<Candidate *> published;
-    for (auto & c : candidates_) {
+    for (auto &c : candidates_) {
       if (c.unseen > 0) {
         continue;
       }
       double span = 0.0;
       if (c.history.size() > 1) {
-        const auto & origin = c.history.front();
-        for (const auto & p : c.history) {
+        const auto &origin = c.history.front();
+        for (const auto &p : c.history) {
           span = std::max(
-            span,
-            static_cast<double>(
-              std::hypot(p.first - origin.first, p.second - origin.second)));
+              span, static_cast<double>(std::hypot(p.first - origin.first,
+                                                   p.second - origin.second)));
         }
       }
       if (span >= move_distance_m_) {
@@ -418,11 +412,11 @@ private:
     return published;
   }
 
-  void cloud_cb(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
-  {
+  void cloud_cb(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
     ++frame_index_;
 
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(
+        new pcl::PointCloud<pcl::PointXYZ>);
     pcl::fromROSMsg(*msg, *cloud);
 
     geometry_msgs::msg::PoseArray out;
@@ -437,9 +431,8 @@ private:
         estimate_floor();
         floor_done_ = true;
       }
-      RCLCPP_INFO_THROTTLE(
-        get_logger(), *get_clock(), 1000,
-        "locating floor %d/%d", floor_seen_, floor_frames_);
+      RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+                           "locating floor %d/%d", floor_seen_, floor_frames_);
       return;
     }
 
@@ -451,7 +444,7 @@ private:
 
     std::unordered_set<VoxelKey, VoxelKeyHash> occupied;
     occupied.reserve(down->size());
-    for (const auto & pt : down->points) {
+    for (const auto &pt : down->points) {
       occupied.insert(to_key(pt.x, pt.y, pt.z));
     }
     // Phase 2: seed the background model quickly, then settle to a slow rate.
@@ -462,15 +455,16 @@ private:
       ++warmup_seen_;
       pub_->publish(out);
       RCLCPP_INFO_THROTTLE(
-        get_logger(), *get_clock(), 1000,
-        "warmup %d/%d - learning the static scene (no detections yet)",
-        warmup_seen_, warmup_frames_);
+          get_logger(), *get_clock(), 1000,
+          "warmup %d/%d - learning the static scene (no detections yet)",
+          warmup_seen_, warmup_frames_);
       return;
     }
 
-    pcl::PointCloud<pcl::PointXYZ>::Ptr candidates(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr candidates(
+        new pcl::PointCloud<pcl::PointXYZ>);
     candidates->reserve(down->size() / 4);
-    for (const auto & pt : down->points) {
+    for (const auto &pt : down->points) {
       if (!is_static(to_key(pt.x, pt.y, pt.z))) {
         candidates->push_back(pt);
       }
@@ -479,7 +473,8 @@ private:
     std::vector<ClusterShape> shapes;
     std::size_t n_clusters = 0;
     if (candidates->size() >= static_cast<std::size_t>(min_cluster_size_)) {
-      pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>);
+      pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(
+          new pcl::search::KdTree<pcl::PointXYZ>);
       tree->setInputCloud(candidates);
 
       std::vector<pcl::PointIndices> cluster_indices;
@@ -492,7 +487,7 @@ private:
       ec.extract(cluster_indices);
       n_clusters = cluster_indices.size();
 
-      for (const auto & cluster : cluster_indices) {
+      for (const auto &cluster : cluster_indices) {
         const ClusterShape shape = measure(*candidates, cluster);
         if (looks_human(shape)) {
           shapes.push_back(shape);
@@ -501,7 +496,7 @@ private:
     }
 
     if (require_motion_) {
-      for (const Candidate * c : track_motion(shapes)) {
+      for (const Candidate *c : track_motion(shapes)) {
         geometry_msgs::msg::Pose pose;
         pose.position.x = c->x;
         pose.position.y = c->y;
@@ -510,7 +505,7 @@ private:
         out.poses.push_back(pose);
       }
     } else {
-      for (const auto & shape : shapes) {
+      for (const auto &shape : shapes) {
         geometry_msgs::msg::Pose pose;
         pose.position.x = shape.cx;
         pose.position.y = shape.cy;
@@ -523,10 +518,11 @@ private:
     pub_->publish(out);
 
     if (debug_stats_) {
-      RCLCPP_INFO_THROTTLE(
-        get_logger(), *get_clock(), 1000,
-        "cloud=%zu candidates=%zu clusters=%zu human_shaped=%zu published=%zu",
-        down->size(), candidates->size(), n_clusters, shapes.size(), out.poses.size());
+      RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+                           "cloud=%zu candidates=%zu clusters=%zu "
+                           "human_shaped=%zu published=%zu",
+                           down->size(), candidates->size(), n_clusters,
+                           shapes.size(), out.poses.size());
     }
   }
 
@@ -577,8 +573,7 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr pub_;
 };
 
-int main(int argc, char ** argv)
-{
+int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
   rclcpp::spin(std::make_shared<PersonClusterNode>());
   rclcpp::shutdown();

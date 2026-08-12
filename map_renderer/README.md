@@ -38,7 +38,7 @@ assets next to the renderer executable after each build.
 
 ## Packet format
 
-Every datagram must be exactly 28 bytes. Multi-byte values use big-endian byte
+Every datagram must be exactly 44 bytes. Multi-byte values use big-endian byte
 order, even though the transport is local, so the wire format does not depend
 on compiler layout or host endianness.
 
@@ -49,6 +49,7 @@ on compiler layout or host endianness.
 | 8 | IEEE-754 32-bit float | y coordinate |
 | 12 | unsigned 64-bit integer | monotonically increasing sequence |
 | 20 | signed 64-bit integer | sender-defined observation timestamp |
+| 28 | 16 ASCII bytes | display label (null-padded), e.g. HARRY |
 
 The logical value is:
 
@@ -59,6 +60,7 @@ struct PersonUpdate {
     float y;
     std::uint64_t sequence;
     std::int64_t timestamp;
+    std::string name;
 };
 ```
 

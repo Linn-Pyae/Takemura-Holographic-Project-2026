@@ -5,12 +5,34 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import hypot
 from typing import Protocol, Sequence
+import random
 
 from .models import Detection, Position2D, Track
 from .motion import MotionModel
 
 
-DEFAULT_NAMES = ("HARRY", "RON", "HERMIONE", "DRACO", "LUNA")
+DEFAULT_NAMES = (
+    "HARRY",
+    "RON",
+    "HERMIONE",
+    "DRACO",
+    "LUNA",
+    "NEVILLE",
+    "GINNY",
+    "FRED",
+    "GEORGE",
+    "CHO",
+    "CEDRIC",
+    "SEVERUS",
+    "MINERVA",
+    "HAGRID",
+    "DOBBY",
+    "SIRIUS",
+    "REMUS",
+    "TONKS",
+    "OLIVER",
+    "PERCY",
+)
 
 
 class AssociationStrategy(Protocol):
@@ -259,10 +281,21 @@ class MultiObjectTracker:
         return tuple(self._tracks)
 
     def _new_name(self, track_id: int) -> str:
-        index = track_id - 1
-        base = self.names[index % len(self.names)]
-        cycle = index // len(self.names)
-        return base if cycle == 0 else f"{base}_{cycle + 1}"
+        """Pick a random Harry Potter name not currently used by an active track."""
+        del track_id  # IDs stay numeric; labels are randomized independently.
+        used = {track.name for track in self._tracks}
+        available = [name for name in self.names if name not in used]
+        if available:
+            return random.choice(available)
+
+        # All base names are in use — append a cycle suffix.
+        base = random.choice(self.names)
+        suffix = 2
+        candidate = f"{base}_{suffix}"
+        while candidate in used:
+            suffix += 1
+            candidate = f"{base}_{suffix}"
+        return candidate
 
     def _create_track(self, detection: Detection) -> Track:
         track_id = self._next_id
