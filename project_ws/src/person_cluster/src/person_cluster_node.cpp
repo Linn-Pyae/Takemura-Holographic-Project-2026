@@ -96,6 +96,7 @@ public:
   PersonClusterNode() : Node("person_cluster_node") {
     auto_floor_ = declare_parameter<bool>("auto_floor", true);
     floor_z_ = declare_parameter<double>("floor_z", -0.85);
+    floor_search_span_ = declare_parameter<double>("floor_search_span", 0.60);
     z_offset_min_ = declare_parameter<double>("z_offset_min", 0.30);
     z_offset_max_ = declare_parameter<double>("z_offset_max", 2.00);
     max_range_ = declare_parameter<double>("max_range", 15.0);
@@ -132,13 +133,14 @@ public:
 
     require_motion_ = declare_parameter<bool>("require_motion", true);
     debug_stats_ = declare_parameter<bool>("debug_stats", true);
+    process_period_ = declare_parameter<double>("process_period", 0.12);
 
-    auto qos = rclcpp::SensorDataQoS();
+    auto qos = rclcpp::SensorDataQoS().keep_last(1);
     sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
         "/velodyne_points_bag", qos,
         std::bind(&PersonClusterNode::cloud_cb, this, _1));
-    pub_ = create_publisher<geometry_msgs::msg::PoseArray>("/person_detections",
-                                                           10);
+    pub_ = create_publisher<geometry_msgs::msg::PoseArray>(
+        "/person_detections", rclcpp::QoS(1).reliable());
 
     floor_hist_.assign(kFloorBins, 0);
 
@@ -177,20 +179,44 @@ private:
     }
   }
 
-  /// The floor is the densest horizontal slab in the lower half of the scene.
+  /// The floor is the densest slab just above the lowest returns.
+  ///
+  /// Searching the whole lower half picks the walls instead of the floor when
+  /// the sensor is mounted high: most returns then sit near sensor height, and
+  /// a floor guessed there puts the height band above people's heads.
   void estimate_floor() {
     if (!auto_floor_ || floor_seen_max_ <= floor_seen_min_) {
       return;
     }
-    const float midpoint = 0.5f * (floor_seen_min_ + floor_seen_max_);
-    std::size_t best_bin = 0;
-    long best_count = -1;
+
+    long total = 0;
+    for (const long count : floor_hist_) {
+      total += count;
+    }
+    if (total <= 0) {
+      return;
+    }
+
+    // Ignore the first few stray returns below the floor.
+    const long noise_budget = std::max(1L, total / 200);
+    std::size_t lowest_bin = 0;
+    long seen = 0;
     for (std::size_t i = 0; i < floor_hist_.size(); ++i) {
-      const float z =
-          kFloorRangeMin + (static_cast<float>(i) + 0.5f) * kFloorBinSize;
-      if (z >= midpoint) {
+      seen += floor_hist_[i];
+      if (seen > noise_budget) {
+        lowest_bin = i;
         break;
       }
+    }
+
+    const auto span_bins =
+        static_cast<std::size_t>(floor_search_span_ / kFloorBinSize);
+    const std::size_t last_bin =
+        std::min(floor_hist_.size() - 1, lowest_bin + span_bins);
+
+    std::size_t best_bin = lowest_bin;
+    long best_count = -1;
+    for (std::size_t i = lowest_bin; i <= last_bin; ++i) {
       if (floor_hist_[i] > best_count) {
         best_count = floor_hist_[i];
         best_bin = i;
@@ -201,8 +227,10 @@ private:
                  (static_cast<float>(best_bin) + 0.5f) * kFloorBinSize;
     }
     RCLCPP_INFO(get_logger(),
-                "floor estimated at z=%.2f -> height band %.2f..%.2f", floor_z_,
-                floor_z_ + z_offset_min_, floor_z_ + z_offset_max_);
+                "floor estimated at z=%.2f (lowest return %.2f) -> height band "
+                "%.2f..%.2f",
+                floor_z_, floor_seen_min_, floor_z_ + z_offset_min_,
+                floor_z_ + z_offset_max_);
   }
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr
@@ -413,6 +441,12 @@ private:
   }
 
   void cloud_cb(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
+    const rclcpp::Time t = this->now();
+    if (last_cb_time_.nanoseconds() > 0 &&
+        (t - last_cb_time_).seconds() < process_period_) {
+      return;
+    }
+    last_cb_time_ = t;
     ++frame_index_;
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(
@@ -491,6 +525,16 @@ private:
         const ClusterShape shape = measure(*candidates, cluster);
         if (looks_human(shape)) {
           shapes.push_back(shape);
+        } else {
+          const double r = std::max(1.0, static_cast<double>(shape.range));
+          const int needed =
+              std::max(min_points_floor_,
+                       static_cast<int>(std::lround(points_at_one_meter_ / r)));
+          RCLCPP_INFO_THROTTLE(
+              get_logger(), *get_clock(), 2000,
+              "reject pts=%zu need=%d r=%.1f h=%.2f w=%.2f vert=%.2f",
+              shape.points, needed, shape.range, shape.height, shape.width,
+              shape.verticality);
         }
       }
     }
@@ -528,6 +572,7 @@ private:
 
   bool auto_floor_;
   double floor_z_;
+  double floor_search_span_;
   double z_offset_min_;
   double z_offset_max_;
   double max_range_;
@@ -557,6 +602,8 @@ private:
   int drop_frames_;
   bool require_motion_;
   bool debug_stats_;
+  double process_period_;
+  rclcpp::Time last_cb_time_{0, 0, RCL_ROS_TIME};
 
   long frame_index_ = 0;
   int floor_seen_ = 0;

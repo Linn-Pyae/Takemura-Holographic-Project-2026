@@ -25,7 +25,13 @@ BAG_SRC_TOPIC="/velodyne_points_wifi"
 CLUSTER_TOPIC="/velodyne_points_bag"
 LIVE_LIDAR_TOPIC="${LIVE_LIDAR_TOPIC:-/velodyne_points}"
 PLAY_DOMAIN="${ROS_DOMAIN_ID:-42}"
-ROS_UNDERLAY="${ROS_UNDERLAY:-/opt/ros/jazzy/setup.bash}"
+# setup.bash cannot be sourced from zsh: BASH_SOURCE is empty, so the prefix
+# becomes $PWD and Jazzy looks for project_ws/setup.sh.
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+  ROS_UNDERLAY="${ROS_UNDERLAY:-/opt/ros/jazzy/setup.zsh}"
+else
+  ROS_UNDERLAY="${ROS_UNDERLAY:-/opt/ros/jazzy/setup.bash}"
+fi
 TAKEMURA_RENDERER_SOCKET="${TAKEMURA_RENDERER_SOCKET:-/tmp/takemura-renderer.sock}"
 
 TARGET="mac"
@@ -78,21 +84,101 @@ setup_mac_env() {
   source "$WS/install/setup.zsh"
 }
 
-setup_pi_env() {
-  if [[ ! -f "$ROS_UNDERLAY" ]]; then
-    echo "error: ROS underlay not found at $ROS_UNDERLAY" >&2
-    echo "       set ROS_UNDERLAY=/path/to/setup.bash and retry" >&2
+setup_mac_live_dds() {
+  PI_HOST="${PI_HOST:-linn.local}"
+  XML="$HOME/fastdds_takemura.xml"
+
+  if [[ -z "$MAC_IP" ]]; then
+    IFACE=$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')
+    MAC_IP=$(ipconfig getifaddr "${IFACE:-en0}" 2>/dev/null)
+  fi
+  if [[ -z "$MAC_IP" ]]; then
+    echo "error: this Mac has no IPv4 address - is WiFi connected?" >&2
     exit 1
   fi
+
+  if [[ -z "$PI_IP" ]]; then
+    PI_IP=$(dscacheutil -q host -a name "$PI_HOST" 2>/dev/null | awk '/^ip_address:/{print $2; exit}')
+  fi
+  if [[ -z "$PI_IP" ]]; then
+    PI_IP=$(ping -c1 -W 2000 "$PI_HOST" 2>/dev/null | head -1 | sed -n 's/.*(\([0-9.]*\)).*/\1/p')
+  fi
+  if [[ -z "$PI_IP" ]]; then
+    echo "error: could not resolve $PI_HOST - is the Pi powered and on the same WiFi?" >&2
+    echo "       you can bypass mDNS with: PI_IP=192.168.0.11 $0" >&2
+    exit 1
+  fi
+
+  echo "dds mac=$MAC_IP  pi=$PI_IP"
+  cat > "$XML" << EOF
+<?xml version="1.0" encoding="UTF-8" ?>
+<dds xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <profiles>
+    <transport_descriptors>
+      <transport_descriptor>
+        <transport_id>udp_transport</transport_id>
+        <type>UDPv4</type>
+        <interfaceWhiteList>
+          <address>$MAC_IP</address>
+          <address>127.0.0.1</address>
+        </interfaceWhiteList>
+      </transport_descriptor>
+    </transport_descriptors>
+    <participant profile_name="takemura_client" is_default_profile="true">
+      <rtps>
+        <userTransports>
+          <transport_id>udp_transport</transport_id>
+        </userTransports>
+        <useBuiltinTransports>false</useBuiltinTransports>
+        <builtin>
+          <metatrafficUnicastLocatorList>
+            <locator><udpv4><address>$MAC_IP</address></udpv4></locator>
+          </metatrafficUnicastLocatorList>
+          <initialPeersList>
+            <locator><udpv4><address>$MAC_IP</address></udpv4></locator>
+            <locator><udpv4><address>127.0.0.1</address></udpv4></locator>
+            <locator><udpv4><address>$PI_IP</address></udpv4></locator>
+          </initialPeersList>
+        </builtin>
+        <defaultUnicastLocatorList>
+          <locator><udpv4><address>$MAC_IP</address></udpv4></locator>
+        </defaultUnicastLocatorList>
+      </rtps>
+    </participant>
+  </profiles>
+</dds>
+EOF
+  export FASTRTPS_DEFAULT_PROFILES_FILE="$XML"
+  export FASTDDS_DEFAULT_PROFILES_FILE="$XML"
+  unset ROS_DISCOVERY_SERVER
+  unset ROS_LOCALHOST_ONLY
+  unset CYCLONEDDS_URI
+}
+
+setup_pi_env() {
+  if [[ -n "${ZSH_VERSION:-}" && "$ROS_UNDERLAY" == *.bash ]]; then
+    ROS_UNDERLAY="${ROS_UNDERLAY%.bash}.zsh"
+  fi
+  if [[ ! -f "$ROS_UNDERLAY" ]]; then
+    echo "error: ROS underlay not found at $ROS_UNDERLAY" >&2
+    echo "       set ROS_UNDERLAY=/path/to/setup.zsh (or setup.bash) and retry" >&2
+    exit 1
+  fi
+  unset COLCON_CURRENT_PREFIX
   # shellcheck disable=SC1090
   source "$ROS_UNDERLAY"
   cd "$WS"
-  if [[ ! -f install/setup.bash ]]; then
+  local ws_setup
+  if [[ -n "${ZSH_VERSION:-}" && -f install/setup.zsh ]]; then
+    ws_setup="$WS/install/setup.zsh"
+  elif [[ -f install/setup.bash ]]; then
+    ws_setup="$WS/install/setup.bash"
+  else
     echo "error: workspace not built. Run:" >&2
     echo "  cd $WS && colcon build && source install/setup.bash" >&2
     exit 1
   fi
-  source "$WS/install/setup.bash"
+  source "$ws_setup"
   export DISPLAY="${DISPLAY:-:0}"
 }
 
@@ -100,6 +186,9 @@ if [[ "$TARGET" == "pi" ]]; then
   setup_pi_env
 else
   setup_mac_env
+  if [[ -z "$BAG" ]]; then
+    setup_mac_live_dds
+  fi
 fi
 
 export ROS_DOMAIN_ID="$PLAY_DOMAIN"
@@ -112,6 +201,9 @@ fi
 export DETECTION_TOPIC="${DETECTION_TOPIC:-/person_detections}"
 export TRACK_TOPIC="${TRACK_TOPIC:-/person_tracks}"
 export TRACK_INFO_TOPIC="${TRACK_INFO_TOPIC:-/person_tracks_info}"
+if [[ -z "$BAG" ]]; then
+  export TRACK_DT="${TRACK_DT:-0.12}"
+fi
 export TAKEMURA_RENDERER_SOCKET
 
 # Open3D viewer topic: bag uses remapped bag topic; live uses sensor topic.
@@ -196,7 +288,10 @@ if [[ -n "$BAG" ]]; then
   ros2 run person_cluster person_cluster_node &
 else
   ros2 run person_cluster person_cluster_node --ros-args \
-    -r "${CLUSTER_TOPIC}:=${LIVE_LIDAR_TOPIC}" &
+    -r "${CLUSTER_TOPIC}:=${LIVE_LIDAR_TOPIC}" \
+    -p process_period:=0.10 \
+    -p min_cluster_size:=3 \
+    -p points_at_one_meter:=25.0 &
 fi
 PIDS+=($!)
 sleep 0.5

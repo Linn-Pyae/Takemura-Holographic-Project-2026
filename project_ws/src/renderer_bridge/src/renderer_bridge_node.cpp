@@ -75,9 +75,9 @@ std::vector<TrackInfo> parseTracksInfoJson(const std::string &json) {
     }
 
     const std::string object = json.substr(obj_start, obj_end - obj_start + 1);
-    const auto id_key = object.find("\"id\"");
-    const auto x_key = object.find("\"x\"");
-    const auto y_key = object.find("\"y\"");
+    const auto id_key = object.find("\"id\":");
+    const auto x_key = object.find("\"x\":");
+    const auto y_key = object.find("\"y\":");
     if (id_key == std::string::npos || x_key == std::string::npos ||
         y_key == std::string::npos) {
       pos = obj_end + 1;
@@ -97,7 +97,7 @@ std::vector<TrackInfo> parseTracksInfoJson(const std::string &json) {
     track.x = *x_opt;
     track.y = *y_opt;
 
-    const auto name_key = object.find("\"name\"");
+    const auto name_key = object.find("\"name\":");
     if (name_key != std::string::npos) {
       if (const auto name_opt = readQuotedStringAfterColon(object, name_key)) {
         track.name = *name_opt;
@@ -124,7 +124,7 @@ public:
     openSocket();
 
     sub_ = create_subscription<std_msgs::msg::String>(
-        track_info_topic_, 10,
+        track_info_topic_, rclcpp::QoS(1).reliable(),
         std::bind(&RendererBridgeNode::onTracksInfo, this,
                   std::placeholders::_1));
 

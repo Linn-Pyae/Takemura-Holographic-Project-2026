@@ -123,7 +123,7 @@ This starts bag + cluster + tracker and opens a **matplotlib 2D map**:
 
 Close the window or press Ctrl+C to stop everything.
 
-The script uses `ROS_DOMAIN_ID=42` so live Pi traffic on domain 0 does not mix in.
+The script uses `ROS_DOMAIN_ID=42`, the same domain as live Pi LiDAR.
 
 ## Inspect raw cloud (Open3D / OpenGL)
 
@@ -145,7 +145,7 @@ Bag + cluster + track + Open3D cloud + matplotlib 2D map:
 
 ## Run (manual)
 
-All terminals: `micromamba activate ros_view`, `export ROS_DOMAIN_ID=42`, and `source project_ws/install/setup.zsh`.
+All terminals: `micromamba activate ros_view`, `export ROS_DOMAIN_ID=42` (live Pi uses 42 too), and `source project_ws/install/setup.zsh`.
 
 ```bash
 # T1 — bag

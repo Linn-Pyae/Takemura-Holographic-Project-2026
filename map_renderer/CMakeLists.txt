@@ -7,6 +7,11 @@ if(NOT raylib_FOUND)
     include(FetchContent)
     set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
+    # Pi V3D is OpenGL 3.1. Raylib's default 3.3 path needs Mesa version
+    # overrides and can leave the lower half of the framebuffer stale.
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm")
+        set(OPENGL_VERSION "2.1" CACHE STRING "OpenGL version for raylib" FORCE)
+    endif()
     FetchContent_Declare(
         raylib
         URL https://github.com/raysan5/raylib/archive/refs/tags/6.0.tar.gz

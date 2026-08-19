@@ -8,10 +8,12 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
+#include <cstdio>
 #include <deque>
 #include <string>
+#include <sys/stat.h>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -20,17 +22,20 @@ constexpr int kInitialWidth = 1280;
 constexpr int kInitialHeight = 720;
 constexpr float kPixelsPerMeter = 72.0F;
 constexpr float kSecondsPerSegment = 1.15F;
-constexpr float kTrailLifetime = 3.0F;
-// Distance travelled between footprints, in scene-space meters.
+// How long a footprint stays on the map, from TAKEMURA_TRAIL_SECONDS.
+float g_trail_lifetime = 2.0F;
+// Fraction of that life a footprint holds full opacity before it starts to
+// fade, so prints read as fresh ink first and then dry out.
+constexpr float kTrailHoldFraction = 0.3F;
+// Distance travelled between footprints, in scene-space meters. Sized like a
+// walking stride so left/right prints read as a Marauder's Map trail.
 constexpr float kFootprintStepDistance = 0.42F;
-// Live LiDAR tracks update ~5 Hz; use a shorter step so footprints appear
-// sooner.
-constexpr float kLiveFootprintStepDistance = 0.18F;
+constexpr float kLiveFootprintStepDistance = 0.42F;
 // Drop a live person if no packet arrives for this long (tracker already
 // drops missed tracks; this clears stale markers/IDs on the map).
 constexpr float kLivePersonTimeoutSeconds = 1.5F;
 constexpr int kFontAtlasSize = 64;
-constexpr float kFootprintLateralOffset = 0.11F;
+constexpr float kFootprintLateralOffset = 0.16F;
 constexpr float kFootprintSize = 0.42F;
 constexpr float kPersonLabelFontSize = 0.32F;
 
@@ -88,6 +93,78 @@ bool envFlagEnabled(const char *name) {
   return value != nullptr && value[0] != '\0' && value[0] != '0';
 }
 
+float envFloat(const char *name, float fallback) {
+  const char *value = std::getenv(name);
+  if (value == nullptr || value[0] == '\0') {
+    return fallback;
+  }
+  char *end = nullptr;
+  const float parsed = std::strtof(value, &end);
+  if (end == value) {
+    return fallback;
+  }
+  return parsed;
+}
+
+void fillMonitorIfRequested() {
+  if (!envFlagEnabled("TAKEMURA_RENDERER_FULLSCREEN")) {
+    return;
+  }
+  const int monitor = GetCurrentMonitor();
+  const int width = GetMonitorWidth(monitor);
+  const int height = GetMonitorHeight(monitor);
+  if (width <= 0 || height <= 0) {
+    return;
+  }
+  if (GetScreenWidth() != width || GetScreenHeight() != height) {
+    SetWindowSize(width, height);
+    SetWindowPosition(0, 0);
+  }
+}
+
+const char *viewFilePath() {
+  const char *value = std::getenv("TAKEMURA_VIEW_FILE");
+  if (value != nullptr && value[0] != '\0') {
+    return value;
+  }
+  return "/tmp/takemura-view";
+}
+
+bool loadViewFile(float &pan_x, float &pan_y, float &zoom, float &rotation,
+                  time_t &seen_mtime) {
+  struct stat info{};
+  if (stat(viewFilePath(), &info) != 0) {
+    return false;
+  }
+  if (info.st_mtime == seen_mtime) {
+    return false;
+  }
+  std::FILE *file = std::fopen(viewFilePath(), "r");
+  if (file == nullptr) {
+    return false;
+  }
+  float parsed_x = 0.0F;
+  float parsed_y = 0.0F;
+  float parsed_zoom = 1.0F;
+  float parsed_rotation = 0.0F;
+  const int count = std::fscanf(file, "%f %f %f %f", &parsed_x, &parsed_y,
+                                &parsed_zoom, &parsed_rotation);
+  std::fclose(file);
+  if (count < 3) {
+    return false;
+  }
+  pan_x = parsed_x;
+  pan_y = parsed_y;
+  zoom = parsed_zoom;
+  if (count >= 4) {
+    rotation = parsed_rotation;
+  }
+  seen_mtime = info.st_mtime;
+  TraceLog(LOG_INFO, "View file: pan=(%.0f, %.0f) zoom=%.2f rot=%.1f", pan_x,
+           pan_y, zoom, rotation);
+  return true;
+}
+
 std::string rendererSocketPath() {
   const char *value = std::getenv("TAKEMURA_RENDERER_SOCKET");
   if (value != nullptr && value[0] != '\0') {
@@ -96,9 +173,13 @@ std::string rendererSocketPath() {
   return "/tmp/takemura-renderer.sock";
 }
 
+// LiDAR planar (x forward, y left) onto the parchment:
+// -90 deg yaw then a horizontal mirror so room left/right match the screen.
+// (x, y) -> (-y, -x). Forward stays screen-up; LiDAR +Y is screen-left.
+Vector2 lidarPlanarToMap(float x, float y) { return {-y, -x}; }
+
 void applyLiveUpdate(LivePerson &person, const mapipc::PersonUpdate &update) {
-  // Raylib 2D has +Y down; LiDAR planar Y stays as-is so map matches bag frame.
-  person.position = {update.x, update.y};
+  person.position = lidarPlanarToMap(update.x, update.y);
   if (!update.name.empty()) {
     person.label = update.name;
   } else if (person.label.empty()) {
@@ -166,9 +247,35 @@ Vector2 sampleDemoTrack(float elapsed_seconds) {
 }
 
 float trailOpacity(float age) {
-  const float progress = std::clamp(age / kTrailLifetime, 0.0F, 1.0F);
-  const float eased = progress * progress * (3.0F - 2.0F * progress);
-  return 1.0F - eased;
+  const float progress = std::clamp(age / g_trail_lifetime, 0.0F, 1.0F);
+  if (progress <= kTrailHoldFraction) {
+    return 1.0F;
+  }
+  const float fade =
+      (progress - kTrailHoldFraction) / (1.0F - kTrailHoldFraction);
+  return 1.0F - fade * fade * (3.0F - 2.0F * fade);
+}
+
+// Ages a trail without adding to it. Prints left by someone the tracker has
+// lost keep fading on their own instead of vanishing with the marker.
+void ageTrail(std::deque<TrailPoint> &trail, float dt) {
+  for (TrailPoint &point : trail) {
+    point.age += dt;
+  }
+  while (!trail.empty() && trail.front().age >= g_trail_lifetime) {
+    trail.pop_front();
+  }
+}
+
+void updateFadingTrails(std::vector<std::deque<TrailPoint>> &trails, float dt) {
+  for (auto it = trails.begin(); it != trails.end();) {
+    ageTrail(*it, dt);
+    if (it->empty()) {
+      it = trails.erase(it);
+    } else {
+      ++it;
+    }
+  }
 }
 
 void updateTrail(std::deque<TrailPoint> &trail, Vector2 person_position,
@@ -176,16 +283,15 @@ void updateTrail(std::deque<TrailPoint> &trail, Vector2 person_position,
                  float &distance_since_last_footprint,
                  Vector2 &previous_position, bool &has_previous_position,
                  bool &next_is_right_foot) {
-  for (TrailPoint &point : trail) {
-    point.age += dt;
-  }
-  while (!trail.empty() && trail.front().age >= kTrailLifetime) {
-    trail.pop_front();
-  }
+  ageTrail(trail, dt);
 
   if (!has_previous_position) {
     previous_position = person_position;
     has_previous_position = true;
+    // Plant one print immediately so a newly detected person is visible
+    // before they have walked a full step distance.
+    trail.push_back({person_position, 0.0F, 0.0F, next_is_right_foot});
+    next_is_right_foot = !next_is_right_foot;
     return;
   }
 
@@ -254,11 +360,15 @@ void drainLiveUpdates(mapipc::UnixDatagramReceiver &receiver,
 }
 
 void updateLiveTrails(std::unordered_map<std::int32_t, LivePerson> &people,
+                      std::vector<std::deque<TrailPoint>> &fading_trails,
                       float dt) {
   for (auto it = people.begin(); it != people.end();) {
     LivePerson &person = it->second;
     person.seconds_since_update += dt;
     if (person.seconds_since_update > kLivePersonTimeoutSeconds) {
+      if (!person.trail.empty()) {
+        fading_trails.push_back(std::move(person.trail));
+      }
       it = people.erase(it);
       continue;
     }
@@ -277,14 +387,55 @@ void resetLivePerson(LivePerson &person) {
   person.next_is_right_foot = true;
 }
 
-void drawMapBackground() {
+constexpr Color kHeadingInk{88, 38, 32, 200};
+constexpr float kHeadingLength = 2.4F;
+
+void drawLidarHeading() {
+  // Forward = screen-up; LiDAR +Y (left) = screen-left after the mirror.
+  const Vector2 origin{0.0F, 0.0F};
+  const Vector2 forward = lidarPlanarToMap(kHeadingLength, 0.0F);
+  const Vector2 left = lidarPlanarToMap(0.0F, kHeadingLength);
+  DrawCircleV(origin, 0.08F, kHeadingInk);
+  DrawLineEx(origin, forward, 0.045F, kHeadingInk);
+  DrawLineEx(origin, left, 0.045F, Fade(kHeadingInk, 0.65F));
+}
+
+// Text is drawn in screen space after EndMode2D. Inside the camera a rotated
+// map would turn every label upside down or mirror it.
+void drawScreenLabel(const Camera2D &camera, Font font, Vector2 world,
+                     const char *text, float world_size, Vector2 screen_offset,
+                     bool centered, Color ink) {
+  const Vector2 anchor = GetWorldToScreen2D(world, camera);
+  const float size = std::max(14.0F, world_size * camera.zoom);
+  const float spacing = size * 0.05F;
+  Vector2 position{anchor.x + screen_offset.x, anchor.y + screen_offset.y};
+  if (centered) {
+    const Vector2 extent = MeasureTextEx(font, text, size, spacing);
+    position.x -= extent.x * 0.5F;
+    position.y -= extent.y * 0.5F;
+  }
+  DrawTextEx(font, text, position, size, spacing, ink);
+}
+
+void drawLidarHeadingLabels(const Camera2D &camera, Font font) {
+  drawScreenLabel(camera, font, lidarPlanarToMap(kHeadingLength, 0.0F),
+                  "LIDAR FWD", 0.22F, {0.0F, -14.0F}, true, kHeadingInk);
+  drawScreenLabel(camera, font, lidarPlanarToMap(0.0F, kHeadingLength),
+                  "LIDAR LEFT", 0.22F, {0.0F, -14.0F}, true, kHeadingInk);
+}
+
+void drawMapBackground(bool draw_demo_route) {
   constexpr Color grid_color{116, 95, 67, 55};
   constexpr Color route_color{95, 69, 45, 75};
 
-  for (int coordinate = -20; coordinate <= 20; ++coordinate) {
+  for (int coordinate = -20; coordinate <= 20; coordinate += 2) {
     const float value = static_cast<float>(coordinate);
     DrawLineEx({value, -12.0F}, {value, 12.0F}, 0.012F, grid_color);
     DrawLineEx({-20.0F, value}, {20.0F, value}, 0.012F, grid_color);
+  }
+
+  if (!draw_demo_route) {
+    return;
   }
 
   DrawRectangleLinesEx({-3.1F, -1.4F, 2.2F, 1.8F}, 0.05F, route_color);
@@ -371,13 +522,16 @@ void drawFootprints(const std::deque<TrailPoint> &trail,
   }
 }
 
-void drawPerson(Vector2 position, const char *name, Color ink, Font font) {
+void drawPerson(Vector2 position, Color ink) {
   DrawCircleV(position, 0.24F, Fade(ink, 0.18F));
   DrawCircleLinesV(position, 0.18F, ink);
   DrawCircleV(position, 0.075F, ink);
+}
 
-  DrawTextEx(font, name, {position.x + 0.30F, position.y - 0.34F},
-             kPersonLabelFontSize, 0.018F, ink);
+void drawPersonLabel(const Camera2D &camera, Font font, Vector2 position,
+                     const char *name, Color ink) {
+  drawScreenLabel(camera, font, position, name, kPersonLabelFontSize,
+                  {14.0F, -10.0F}, false, ink);
 }
 
 } // namespace
@@ -386,7 +540,15 @@ int main() {
   SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
   InitWindow(kInitialWidth, kInitialHeight,
              "Takemura Holographic Renderer - Trail Demo");
-  SetTargetFPS(60);
+  if (!IsWindowReady()) {
+    TraceLog(LOG_ERROR, "InitWindow failed. On the Pi set DISPLAY=:0 and "
+                        "MESA_GL_VERSION_OVERRIDE=3.3");
+    return 1;
+  }
+  fillMonitorIfRequested();
+  SetTargetFPS(30);
+  g_trail_lifetime =
+      std::max(1.0F, envFloat("TAKEMURA_TRAIL_SECONDS", g_trail_lifetime));
 
   const std::string regular_font_path = assetPath("fonts/FeENrm28C.otf");
   Font regular_font =
@@ -432,8 +594,18 @@ int main() {
 
   Camera2D camera{};
   camera.target = {0.0F, 0.0F};
-  camera.rotation = 0.0F;
+  camera.rotation = envFloat("TAKEMURA_VIEW_ROTATION", 0.0F);
   camera.zoom = kPixelsPerMeter;
+  float view_pan_x = envFloat("TAKEMURA_VIEW_PAN_X", 0.0F);
+  float view_pan_y = envFloat("TAKEMURA_VIEW_PAN_Y", 0.0F);
+  float view_zoom = envFloat("TAKEMURA_VIEW_ZOOM", 1.0F);
+  if (view_zoom < 0.15F) {
+    view_zoom = 0.15F;
+  }
+  bool circle_mask = envFlagEnabled("TAKEMURA_HOLO_MASK");
+  // The fan is a display surface, so the tuning overlay is opt-in.
+  bool show_view_help = envFlagEnabled("TAKEMURA_VIEW_HUD");
+  time_t view_file_mtime = 0;
 
   const bool force_demo = envFlagEnabled("TAKEMURA_RENDERER_DEMO");
   mapipc::UnixDatagramReceiver receiver(rendererSocketPath());
@@ -460,6 +632,8 @@ int main() {
        Color{42, 62, 73, 255}},
   }};
   std::unordered_map<std::int32_t, LivePerson> live_people;
+  // Trails of people the tracker has dropped, still fading out.
+  std::vector<std::deque<TrailPoint>> fading_trails;
 
   while (!WindowShouldClose()) {
     if (IsKeyPressed(KEY_SPACE)) {
@@ -476,12 +650,57 @@ int main() {
       for (auto &entry : live_people) {
         resetLivePerson(entry.second);
       }
+      fading_trails.clear();
+    }
+
+    fillMonitorIfRequested();
+    loadViewFile(view_pan_x, view_pan_y, view_zoom, camera.rotation,
+                 view_file_mtime);
+
+    const float pan_speed = 180.0F * GetFrameTime();
+    if (IsKeyDown(KEY_LEFT)) {
+      view_pan_x -= pan_speed;
+    }
+    if (IsKeyDown(KEY_RIGHT)) {
+      view_pan_x += pan_speed;
+    }
+    if (IsKeyDown(KEY_UP)) {
+      view_pan_y -= pan_speed;
+    }
+    if (IsKeyDown(KEY_DOWN)) {
+      view_pan_y += pan_speed;
+    }
+    if (IsKeyDown(KEY_EQUAL) || IsKeyDown(KEY_KP_ADD)) {
+      view_zoom += 0.6F * GetFrameTime();
+    }
+    if (IsKeyDown(KEY_MINUS) || IsKeyDown(KEY_KP_SUBTRACT)) {
+      view_zoom -= 0.6F * GetFrameTime();
+    }
+    view_zoom = std::clamp(view_zoom, 0.15F, 4.0F);
+    if (IsKeyDown(KEY_LEFT_BRACKET)) {
+      camera.rotation -= 45.0F * GetFrameTime();
+    }
+    if (IsKeyDown(KEY_RIGHT_BRACKET)) {
+      camera.rotation += 45.0F * GetFrameTime();
+    }
+    if (IsKeyPressed(KEY_C)) {
+      circle_mask = !circle_mask;
+    }
+    if (IsKeyPressed(KEY_H)) {
+      show_view_help = !show_view_help;
+    }
+    if (IsKeyPressed(KEY_ZERO)) {
+      view_pan_x = envFloat("TAKEMURA_VIEW_PAN_X", 0.0F);
+      view_pan_y = envFloat("TAKEMURA_VIEW_PAN_Y", 0.0F);
+      view_zoom = envFloat("TAKEMURA_VIEW_ZOOM", 1.0F);
+      camera.rotation = envFloat("TAKEMURA_VIEW_ROTATION", 0.0F);
     }
 
     const float dt = paused ? 0.0F : GetFrameTime();
     if (ipc_mode) {
       drainLiveUpdates(receiver, live_people);
-      updateLiveTrails(live_people, dt);
+      updateLiveTrails(live_people, fading_trails, dt);
+      updateFadingTrails(fading_trails, dt);
     } else {
       demo_time += dt;
       for (DemoPerson &person : demo_people) {
@@ -495,51 +714,104 @@ int main() {
     }
 
     camera.offset = {
-        GetScreenWidth() * 0.5F,
-        GetScreenHeight() * 0.5F,
+        GetScreenWidth() * 0.5F + view_pan_x,
+        GetScreenHeight() * 0.5F + view_pan_y,
     };
+    camera.target = {0.0F, 0.0F};
+    camera.zoom = kPixelsPerMeter * view_zoom;
 
     BeginDrawing();
     ClearBackground(Color{222, 205, 165, 255});
     drawCoverBackground(background_texture);
 
     BeginMode2D(camera);
-    drawMapBackground();
+    drawMapBackground(!ipc_mode);
+    drawLidarHeading();
     if (ipc_mode) {
+      for (const auto &trail : fading_trails) {
+        drawFootprints(trail, footprint_texture);
+      }
       for (const auto &entry : live_people) {
         drawFootprints(entry.second.trail, footprint_texture);
       }
       for (const auto &entry : live_people) {
-        const LivePerson &person = entry.second;
-        drawPerson(person.position, person.label.c_str(), person.ink,
-                   italic_font);
+        drawPerson(entry.second.position, entry.second.ink);
       }
     } else {
       for (const DemoPerson &person : demo_people) {
         drawFootprints(person.trail, footprint_texture);
       }
       for (const DemoPerson &person : demo_people) {
-        drawPerson(person.position, person.name, person.ink, italic_font);
+        drawPerson(person.position, person.ink);
       }
     }
     EndMode2D();
 
+    drawLidarHeadingLabels(camera, regular_font);
     if (ipc_mode) {
-      const std::string status =
-          live_people.empty()
-              ? "LIVE IPC — waiting for tracked people..."
-              : ("LIVE IPC — people: " + std::to_string(live_people.size()));
-      DrawTextEx(regular_font, status.c_str(), {18.0F, 18.0F}, 20.0F, 0.8F,
-                 Color{88, 38, 32, 255});
+      for (const auto &entry : live_people) {
+        const LivePerson &person = entry.second;
+        drawPersonLabel(camera, italic_font, person.position,
+                        person.label.c_str(), person.ink);
+      }
     } else {
-      DrawTextEx(regular_font, "DEMO MODE (no live socket)", {18.0F, 18.0F},
-                 20.0F, 0.8F, Color{88, 38, 32, 255});
+      for (const DemoPerson &person : demo_people) {
+        drawPersonLabel(camera, italic_font, person.position, person.name,
+                        person.ink);
+      }
+    }
+
+    if (circle_mask) {
+      const float screen_width = static_cast<float>(GetScreenWidth());
+      const float screen_height = static_cast<float>(GetScreenHeight());
+      const float radius = std::min(screen_width, screen_height) * 0.5F;
+      const Vector2 center{screen_width * 0.5F, screen_height * 0.5F};
+      const Color hide{0, 0, 0, 255};
+      DrawRectangle(0, 0, GetScreenWidth(), static_cast<int>(center.y - radius),
+                    hide);
+      DrawRectangle(0, static_cast<int>(center.y + radius), GetScreenWidth(),
+                    GetScreenHeight(), hide);
+      DrawRectangle(0, 0, static_cast<int>(center.x - radius),
+                    GetScreenHeight(), hide);
+      DrawRectangle(static_cast<int>(center.x + radius), 0, GetScreenWidth(),
+                    GetScreenHeight(), hide);
+      const int rings = 48;
+      for (int i = 0; i < rings; ++i) {
+        const float inner = radius + static_cast<float>(i) * 6.0F;
+        DrawRing(center, inner, inner + 7.0F, 0.0F, 360.0F, 64, hide);
+      }
+    }
+
+    if (show_view_help) {
+      if (ipc_mode) {
+        const std::string status =
+            live_people.empty()
+                ? "LIVE IPC — waiting for tracked people..."
+                : ("LIVE IPC — people: " + std::to_string(live_people.size()));
+        DrawTextEx(regular_font, status.c_str(), {18.0F, 18.0F}, 20.0F, 0.8F,
+                   Color{88, 38, 32, 255});
+      } else {
+        DrawTextEx(regular_font, "DEMO MODE (no live socket)", {18.0F, 18.0F},
+                   20.0F, 0.8F, Color{88, 38, 32, 255});
+      }
     }
 
     if (paused) {
       DrawTextEx(regular_font, "Paused",
                  {static_cast<float>(GetScreenWidth() - 110), 22.0F}, 22.0F,
                  0.8F, Color{88, 38, 32, 255});
+    }
+
+    if (show_view_help) {
+      char view_status[128];
+      std::snprintf(view_status, sizeof(view_status),
+                    "pan %.0f,%.0f  zoom %.2f  rot %.0f", view_pan_x,
+                    view_pan_y, view_zoom, camera.rotation);
+      DrawTextEx(regular_font, view_status, {18.0F, 46.0F}, 18.0F, 0.7F,
+                 Color{88, 38, 32, 220});
+      DrawTextEx(regular_font,
+                 "echo \"PANX PANY ZOOM ROT\" > /tmp/takemura-view",
+                 {18.0F, 70.0F}, 18.0F, 0.7F, Color{88, 38, 32, 220});
     }
 
     EndDrawing();

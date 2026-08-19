@@ -48,9 +48,18 @@ class PersonTrackNode(Node):
             ),
         )
 
-        self._pub = self.create_publisher(PoseArray, track_topic, 10)
-        self._info_pub = self.create_publisher(String, track_info_topic, 10)
-        self.create_subscription(PoseArray, detection_topic, self._on_detections, 10)
+        from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+
+        qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        self._pub = self.create_publisher(PoseArray, track_topic, qos)
+        self._info_pub = self.create_publisher(String, track_info_topic, qos)
+        self.create_subscription(
+            PoseArray, detection_topic, self._on_detections, qos
+        )
         self.get_logger().info(
             f"{detection_topic} -> tracker -> {track_topic} (+ {track_info_topic}) "
             f"(max_distance={max_distance}, max_missed={max_missed}, dt={dt})"
