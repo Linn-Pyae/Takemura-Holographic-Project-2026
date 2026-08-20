@@ -36,7 +36,7 @@ double quaternion_yaw(const geometry_msgs::msg::Quaternion &quaternion) {
  * ROS adapter for the ROS-independent LineExtractor.
  *
  * Input value 0 is treated as unconfirmed/unknown, never as proven free space.
- * Only cells at or above occupied_threshold participate in contour extraction.
+ * Only cells at or above occupied_threshold participate in shape extraction.
  */
 class StaticMapLineExtractorNode : public rclcpp::Node {
  public:
@@ -53,12 +53,26 @@ class StaticMapLineExtractorNode : public rclcpp::Node {
     parameters.maximum_line_gap =
         declare_parameter<double>("maximum_line_gap", 0.20);
     parameters.minimum_component_cells =
-        declare_parameter<int>("minimum_component_cells", 3);
-    line_width_ = declare_parameter<double>("line_width", 0.04);
+        declare_parameter<int>("minimum_component_cells", 8);
+    parameters.wall_min_length =
+        declare_parameter<double>("wall_min_length", 1.20);
+    parameters.wall_min_aspect_ratio =
+        declare_parameter<double>("wall_min_aspect_ratio", 3.50);
+    parameters.minimum_block_size =
+        declare_parameter<double>("minimum_block_size", 0.40);
+    parameters.wall_merge_angle_degrees =
+        declare_parameter<double>("wall_merge_angle_degrees", 12.0);
+    parameters.wall_merge_distance =
+        declare_parameter<double>("wall_merge_distance", 0.30);
+    parameters.wall_merge_gap =
+        declare_parameter<double>("wall_merge_gap", 0.50);
+    wall_line_width_ = declare_parameter<double>("wall_line_width", 0.12);
+    block_line_width_ = declare_parameter<double>("block_line_width", 0.07);
     update_period_ = declare_parameter<double>("update_period", 0.20);
 
-    if (!std::isfinite(line_width_) || line_width_ <= 0.0) {
-      throw std::invalid_argument("line_width must be positive and finite");
+    if (!std::isfinite(wall_line_width_) || wall_line_width_ <= 0.0 ||
+        !std::isfinite(block_line_width_) || block_line_width_ <= 0.0) {
+      throw std::invalid_argument("shape line widths must be positive and finite");
     }
     if (!std::isfinite(update_period_) || update_period_ < 0.0) {
       throw std::invalid_argument("update_period must be non-negative and finite");
@@ -74,10 +88,11 @@ class StaticMapLineExtractorNode : public rclcpp::Node {
 
     RCLCPP_INFO(
         get_logger(),
-        "static map line extractor ready: occupied>=%d, epsilon=%.3f m, "
-        "minimum length=%.3f m, maximum gap=%.3f m",
-        parameters.occupied_threshold, parameters.contour_epsilon,
-        parameters.minimum_line_length, parameters.maximum_line_gap);
+        "static map shape extractor ready: occupied>=%d, wall>=%.2f m "
+        "aspect>=%.2f, block>=%.2f m, merge gap=%.2f m",
+        parameters.occupied_threshold, parameters.wall_min_length,
+        parameters.wall_min_aspect_ratio,
+        parameters.minimum_block_size, parameters.wall_merge_gap);
   }
 
  private:
@@ -112,11 +127,13 @@ class StaticMapLineExtractorNode : public rclcpp::Node {
 
     try {
       const auto result = extractor_->extract(grid->data, geometry);
-      publish_lines(*grid, result.lines);
+      publish_shapes(*grid, result);
       ++published_count_;
       if (published_count_ == 1U || published_count_ % 25U == 0U) {
         RCLCPP_INFO(get_logger(),
-                    "published %zu line segments from %zu contours in frame %s",
+                    "published coarse map: walls=%zu blocks=%zu flattened=%zu "
+                    "from %zu components in frame %s",
+                    result.wall_lines.size(), result.blocks.size(),
                     result.lines.size(), result.simplified_contours.size(),
                     grid->header.frame_id.c_str());
       }
@@ -125,43 +142,69 @@ class StaticMapLineExtractorNode : public rclcpp::Node {
     }
   }
 
-  void publish_lines(
+  static void append_line(visualization_msgs::msg::Marker &marker,
+                          const static_map_line_extractor::LineSegment &line) {
+    geometry_msgs::msg::Point start;
+    start.x = line.start.x;
+    start.y = line.start.y;
+    start.z = 0.0;
+    marker.points.push_back(start);
+
+    geometry_msgs::msg::Point end;
+    end.x = line.end.x;
+    end.y = line.end.y;
+    end.z = 0.0;
+    marker.points.push_back(end);
+  }
+
+  void publish_shapes(
       const nav_msgs::msg::OccupancyGrid &grid,
-      const std::vector<static_map_line_extractor::LineSegment> &lines) {
-    visualization_msgs::msg::Marker marker;
-    marker.header = grid.header;
-    marker.ns = "static_environment_lines";
-    marker.id = 0;
-    marker.type = visualization_msgs::msg::Marker::LINE_LIST;
-    marker.action = visualization_msgs::msg::Marker::ADD;
-    marker.pose.orientation.w = 1.0;
-    marker.scale.x = line_width_;
-    marker.color.r = 0.10F;
-    marker.color.g = 0.90F;
-    marker.color.b = 1.00F;
-    marker.color.a = 1.00F;
-    marker.points.reserve(lines.size() * 2U);
+      const static_map_line_extractor::ExtractionResult &result) {
+    visualization_msgs::msg::Marker walls;
+    walls.header = grid.header;
+    walls.ns = "static_environment_walls";
+    walls.id = 0;
+    walls.type = visualization_msgs::msg::Marker::LINE_LIST;
+    walls.action = visualization_msgs::msg::Marker::ADD;
+    walls.pose.orientation.w = 1.0;
+    walls.scale.x = wall_line_width_;
+    walls.color.r = 0.05F;
+    walls.color.g = 0.48F;
+    walls.color.b = 0.57F;
+    walls.color.a = 1.00F;
+    walls.points.reserve(result.wall_lines.size() * 2U);
+    for (const auto &line : result.wall_lines) {
+      append_line(walls, line);
+    }
 
-    for (const auto &line : lines) {
-      geometry_msgs::msg::Point start;
-      start.x = line.start.x;
-      start.y = line.start.y;
-      start.z = 0.0;
-      marker.points.push_back(start);
-
-      geometry_msgs::msg::Point end;
-      end.x = line.end.x;
-      end.y = line.end.y;
-      end.z = 0.0;
-      marker.points.push_back(end);
+    visualization_msgs::msg::Marker blocks;
+    blocks.header = grid.header;
+    blocks.ns = "static_environment_blocks";
+    blocks.id = 0;
+    blocks.type = visualization_msgs::msg::Marker::LINE_LIST;
+    blocks.action = visualization_msgs::msg::Marker::ADD;
+    blocks.pose.orientation.w = 1.0;
+    blocks.scale.x = block_line_width_;
+    blocks.color.r = 0.80F;
+    blocks.color.g = 0.48F;
+    blocks.color.b = 0.12F;
+    blocks.color.a = 1.00F;
+    blocks.points.reserve(result.blocks.size() * 8U);
+    for (const auto &block : result.blocks) {
+      for (std::size_t index = 0; index < block.corners.size(); ++index) {
+        const auto next = (index + 1U) % block.corners.size();
+        append_line(blocks, {block.corners[index], block.corners[next]});
+      }
     }
 
     visualization_msgs::msg::MarkerArray output;
-    output.markers.push_back(std::move(marker));
+    output.markers.push_back(std::move(walls));
+    output.markers.push_back(std::move(blocks));
     line_publisher_->publish(output);
   }
 
-  double line_width_{0.04};
+  double wall_line_width_{0.12};
+  double block_line_width_{0.07};
   double update_period_{0.20};
   bool has_last_update_time_{false};
   rclcpp::Time last_update_time_{0, 0, RCL_ROS_TIME};

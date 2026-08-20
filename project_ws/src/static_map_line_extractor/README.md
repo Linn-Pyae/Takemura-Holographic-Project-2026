@@ -1,8 +1,10 @@
 # static_map_line_extractor
 
-`/static_map/debug_grid`のstatic候補セルを、簡略化した2D輪郭線へ変換する
-独立ROS 2 C++ packageです。人物検出、tracking、renderer、bridge、
-Unix socketには接続しません。
+`/static_map/debug_grid`のstatic候補セルを、表示向けの大まかな2D形状へ変換する
+独立ROS 2 C++ packageです。細かな輪郭をそのまま線分化せず、細長い塊は壁の
+中心線、まとまった小さな塊は回転可能な長方形として表現します。
+
+人物検出、tracking、renderer、Unix socketには直接接続しません。
 
 ## Pipeline
 
@@ -11,11 +13,13 @@ Unix socketには接続しません。
   -> static_map_projector
   -> /static_map/debug_grid (OccupancyGrid)
   -> static_map_line_extractor
-  -> /static_map/lines (MarkerArray / LINE_LIST)
+  -> /static_map/lines (MarkerArray)
+       ├─ static_environment_walls  : 太い壁中心線
+       └─ static_environment_blocks : 長方形の外周
 ```
 
 入力Gridの値0は自由空間ではなく、static未確定として扱います。
-`occupied_threshold`以上のセルだけが輪郭抽出対象です。
+`occupied_threshold`以上のセルだけが抽出対象です。
 
 ## Topics
 
@@ -24,34 +28,38 @@ Unix socketには接続しません。
 | Subscribe | `/static_map/debug_grid` | `nav_msgs/msg/OccupancyGrid` | reliable, transient local, depth 1 |
 | Publish | `/static_map/lines` | `visualization_msgs/msg/MarkerArray` | reliable, transient local, depth 1 |
 
-出力は1個の`Marker.LINE_LIST`に集約され、各線分につき2点
-`(x1, y1, 0)`、`(x2, y2, 0)`を格納します。`header.frame_id`とstampは
-入力OccupancyGridから継承します。
+出力MarkerArrayには2個の`Marker.LINE_LIST`を格納します。
+
+- `static_environment_walls`: 壁1本につき2点。太い青緑色
+- `static_environment_blocks`: 長方形1個につき4辺8点。細い橙色
+
+`header.frame_id`とstampは入力OccupancyGridから継承します。既存bridgeとの互換性を
+保つため、どちらも通常の`LINE_LIST`です。bridge側では壁と長方形の辺が線分として
+平坦化されます。
 
 ## Extraction algorithm
 
-1. `occupied_threshold`以上のセルだけを255とする2値画像を作る
-2. `maximum_line_gap`に対応するOpenCV morphology closeで小さな隙間を閉じる
-3. connected componentsで小さな孤立領域を除く
-4. OpenCV `findContours(RETR_EXTERNAL, CHAIN_APPROX_SIMPLE)`で外輪郭を抽出
-5. `approxPolyDP`で輪郭を簡略化
-6. 簡略化された隣接頂点を線分化し、短い線分を除く
-7. Grid cell座標をメートル座標へ変換する
+1. `occupied_threshold`以上のセルから2値画像を作る
+2. `maximum_line_gap`に対応するmorphology closeで小さな隙間を閉じる
+3. 8近傍connected componentsを取り、8セル未満の小ノイズを除く
+4. 各componentへOpenCV `minAreaRect`を当てはめる
+5. 長さと縦横比が壁条件を満たす細長いcomponentを、1本の中心線へ置き換える
+6. それ以外を、見やすい最小寸法を持つ回転長方形へ置き換える
+7. 角度・横ずれ・端点間隔が近い壁中心線を1本へ結合する
+8. Grid座標へoriginとyawを適用してメートル座標へ変換する
 
-Hough Transform、RANSAC、壁分類は使用していません。
+これは壁や机などを厳密に認識するsemantic modelではなく、点群の幾何形状を
+「壁らしい線」と「その他の箱」に大まかに当てはめる表示用モデルです。
 
 ## Coordinate conversion
 
-輪郭点`(column, row)`はセル中心として、まずGridローカル座標へ変換します。
+Grid点`(column, row)`はセル中心としてローカル座標へ変換した後、
+OccupancyGrid originの位置とyawを適用します。
 
 ```text
 local_x = (column + 0.5) * resolution
 local_y = (row    + 0.5) * resolution
-```
 
-その後、OccupancyGrid originの位置とyawを適用します。
-
-```text
 world_x = origin_x + cos(yaw)*local_x - sin(yaw)*local_y
 world_y = origin_y + sin(yaw)*local_x + cos(yaw)*local_y
 ```
@@ -63,14 +71,21 @@ world_y = origin_y + sin(yaw)*local_x + cos(yaw)*local_y
 
 | Parameter | Default | Unit / meaning |
 | --- | ---: | --- |
-| `occupied_threshold` | `100` | 輪郭対象になる最小Grid値 |
-| `min_contour_area` | `0.0` | 最小輪郭面積 `[m^2]`。細い壁を残すため既定は0 |
-| `contour_epsilon` | `0.10` | `approxPolyDP`の許容誤差 `[m]` |
-| `minimum_line_length` | `0.30` | publishする最小線分長 `[m]` |
-| `maximum_line_gap` | `0.20` | morphology closeで接続する隙間の目安 `[m]` |
-| `minimum_component_cells` | `3` | 残すconnected componentの最小セル数 |
-| `line_width` | `0.04` | RViz Marker線幅 `[m]` |
+| `occupied_threshold` | `100` | 抽出対象になる最小Grid値 |
+| `maximum_line_gap` | `0.20` | close処理でつなぐ小さな隙間 `[m]` |
+| `minimum_component_cells` | `8` | 残すcomponentの最小セル数 |
+| `wall_min_length` | `1.20` | 壁とみなす最小長さ `[m]` |
+| `wall_min_aspect_ratio` | `3.50` | 壁とみなす最小縦横比 |
+| `minimum_block_size` | `0.40` | 長方形を見せる最小一辺 `[m]` |
+| `wall_merge_angle_degrees` | `12.0` | 結合できる壁同士の最大角度差 `[deg]` |
+| `wall_merge_distance` | `0.30` | 結合できる壁同士の最大横ずれ `[m]` |
+| `wall_merge_gap` | `0.50` | 結合できる壁端点間の最大隙間 `[m]` |
+| `wall_line_width` | `0.12` | RVizの壁線幅 `[m]` |
+| `block_line_width` | `0.07` | RVizの長方形線幅 `[m]` |
 | `update_period` | `0.20` | 最短更新周期 `[s]`。0なら全Gridを処理 |
+
+互換用の`min_contour_area`、`contour_epsilon`、`minimum_line_length`も残して
+あります。前2つはデバッグ輪郭、最後は壁の最小長さの下限に使われます。
 
 ## Build
 
@@ -90,14 +105,15 @@ source install/setup.bash
 ros2 run static_map_line_extractor static_map_line_extractor_node
 ```
 
-parameter変更例:
+より大まかな表示にする例:
 
 ```bash
 ros2 run static_map_line_extractor static_map_line_extractor_node --ros-args \
-  -p contour_epsilon:=0.15 \
-  -p minimum_line_length:=0.50 \
-  -p maximum_line_gap:=0.30 \
-  -p minimum_component_cells:=5
+  -p minimum_component_cells:=12 \
+  -p wall_min_length:=1.50 \
+  -p wall_min_aspect_ratio:=4.0 \
+  -p minimum_block_size:=0.50 \
+  -p wall_merge_gap:=0.70
 ```
 
 RViz2ではFixed Frameを入力Gridのframe（サンプルでは`velodyne`）にし、
@@ -105,7 +121,7 @@ MarkerArray displayで`/static_map/lines`を選択します。
 
 ## Existing MCAP verification
 
-3つのterminalを使用します。既存スクリプトの変更は不要です。
+3つのterminalを使用します。
 
 Terminal 1 — bag:
 
@@ -125,7 +141,7 @@ source install/setup.bash
 ros2 run static_map_projector static_map_projector_node
 ```
 
-Terminal 3 — line extractor:
+Terminal 3 — shape extractor:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -143,26 +159,13 @@ ros2 topic echo /static_map/lines --once
 
 ## Tests
 
-C++ unit testはROS messageを使用せず、人工Gridから長い壁、四角形、孤立ノイズ、
-複数物体、origin/yaw座標変換を検証します。
+C++ unit testと同等のROS不要Python testで、人工Gridから長い壁、長方形、
+孤立ノイズ、複数物体、壁の結合、origin/yaw座標変換を検証します。
 
 ```bash
 colcon test --packages-select static_map_line_extractor
-colcon test-result --verbose
-```
 
-ROS 2がないPCでは、`offline/test_line_extractor_offline.py`で同じOpenCV処理を
-確認できます。
-
-```bash
-python -m pip install -r \
-  project_ws/src/static_map_line_extractor/offline/requirements.txt
 python project_ws/src/static_map_line_extractor/offline/test_line_extractor_offline.py
 ```
 
-## Not implemented
-
-- static_map_bridge / Unix socket
-- map_renderer / HDMI / holographic fan
-- 人物trackとの合成
-- Hough Transform / RANSAC / 壁・物体分類
+実MCAP 3件をROSなしで検証する方法は`validation/README.md`を参照してください。

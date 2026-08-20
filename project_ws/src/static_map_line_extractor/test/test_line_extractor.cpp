@@ -41,13 +41,9 @@ TEST(LineExtractorTest, LongWallProducesLongSegment) {
   }
 
   const auto result = LineExtractor(test_parameters()).extract(occupancy, geometry);
-  ASSERT_FALSE(result.lines.empty());
-  const auto longest = std::max_element(
-      result.lines.begin(), result.lines.end(),
-      [](const auto &left, const auto &right) {
-        return left.length() < right.length();
-      });
-  EXPECT_GE(longest->length(), 4.5);
+  ASSERT_EQ(result.wall_lines.size(), 1U);
+  EXPECT_TRUE(result.blocks.empty());
+  EXPECT_GE(result.wall_lines.front().length(), 4.5);
 }
 
 TEST(LineExtractorTest, SquareObstacleProducesClosedOutline) {
@@ -61,6 +57,8 @@ TEST(LineExtractorTest, SquareObstacleProducesClosedOutline) {
 
   const auto result = LineExtractor(test_parameters()).extract(occupancy, geometry);
   ASSERT_EQ(result.simplified_contours.size(), 1U);
+  EXPECT_TRUE(result.wall_lines.empty());
+  EXPECT_EQ(result.blocks.size(), 1U);
   EXPECT_EQ(result.lines.size(), 4U);
 }
 
@@ -101,6 +99,25 @@ TEST(LineExtractorTest, GridCoordinateUsesOriginResolutionAndYaw) {
   const auto world = LineExtractor::grid_cell_to_world(cv::Point(1, 2), geometry);
   EXPECT_NEAR(world.x, 8.75, 1e-9);
   EXPECT_NEAR(world.y, 20.75, 1e-9);
+}
+
+TEST(LineExtractorTest, CollinearWallFragmentsAreMerged) {
+  const GridGeometry geometry{60, 30, 0.10, 0.0, 0.0, 0.0};
+  auto occupancy = empty_grid(geometry);
+  for (int x = 5; x < 25; ++x) {
+    occupancy[index_of(x, 14, geometry)] = 100;
+    occupancy[index_of(x, 15, geometry)] = 100;
+  }
+  for (int x = 28; x < 50; ++x) {
+    occupancy[index_of(x, 14, geometry)] = 100;
+    occupancy[index_of(x, 15, geometry)] = 100;
+  }
+
+  auto parameters = test_parameters();
+  parameters.wall_merge_gap = 0.50;
+  const auto result = LineExtractor(parameters).extract(occupancy, geometry);
+  ASSERT_EQ(result.wall_lines.size(), 1U);
+  EXPECT_GT(result.wall_lines.front().length(), 4.0);
 }
 
 }  // namespace

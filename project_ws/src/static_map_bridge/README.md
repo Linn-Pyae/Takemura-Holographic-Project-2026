@@ -95,17 +95,16 @@ ros2 run static_map_bridge static_map_bridge_node --ros-args \
 
 The subscription uses reliable, transient-local, keep-last(1) QoS.
 
-## Run with the provisional Mild line preset
+## Run with the coarse-shape extractor
 
-The extractor defaults are not changed. Apply Mild only as runtime overrides:
+The extractor publishes walls and oriented blocks as two `LINE_LIST` markers.
+This bridge accepts both markers without a protocol change and flattens block
+outlines into four ordinary line segments.
 
 Terminal 1:
 
 ```bash
-ros2 run static_map_line_extractor static_map_line_extractor_node --ros-args \
-  -p minimum_line_length:=0.50 \
-  -p minimum_component_cells:=5 \
-  -p contour_epsilon:=0.15
+ros2 run static_map_line_extractor static_map_line_extractor_node
 ```
 
 Terminal 2:

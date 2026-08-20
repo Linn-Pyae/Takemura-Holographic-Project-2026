@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ROS-free verification of the OpenCV contour-to-line algorithm."""
+"""ROS-free verification of coarse wall/block shape extraction."""
 
 from __future__ import annotations
 
@@ -24,7 +24,13 @@ class Parameters:
     contour_epsilon: float = 0.05
     minimum_line_length: float = 0.20
     maximum_line_gap: float = 0.0
-    minimum_component_cells: int = 3
+    minimum_component_cells: int = 8
+    wall_min_length: float = 1.20
+    wall_min_aspect_ratio: float = 3.50
+    minimum_block_size: float = 0.40
+    wall_merge_angle_degrees: float = 12.0
+    wall_merge_distance: float = 0.30
+    wall_merge_gap: float = 0.50
 
 
 @dataclass(frozen=True)
@@ -33,6 +39,23 @@ class Geometry:
     origin_x: float = 0.0
     origin_y: float = 0.0
     origin_yaw: float = 0.0
+
+
+Wall = tuple[tuple[float, float], tuple[float, float]]
+Block = tuple[
+    tuple[float, float],
+    tuple[float, float],
+    tuple[float, float],
+    tuple[float, float],
+]
+
+
+@dataclass(frozen=True)
+class ShapeExtraction:
+    contours: list[np.ndarray]
+    wall_lines: list[Wall]
+    blocks: list[Block]
+    lines: list[Wall]
 
 
 def grid_to_world(cell: tuple[int, int], geometry: Geometry) -> tuple[float, float]:
@@ -47,12 +70,78 @@ def grid_to_world(cell: tuple[int, int], geometry: Geometry) -> tuple[float, flo
     )
 
 
-def extract_lines(
+def _normalise(vector: np.ndarray) -> np.ndarray:
+    length = float(np.linalg.norm(vector))
+    if length <= np.finfo(float).eps:
+        return np.array([1.0, 0.0], dtype=float)
+    return vector / length
+
+
+def _merge_walls(walls: list[Wall], parameters: Parameters) -> list[Wall]:
+    merged = list(walls)
+    maximum_angle = math.radians(parameters.wall_merge_angle_degrees)
+    changed = True
+    while changed:
+        changed = False
+        for first_index in range(len(merged)):
+            if changed:
+                break
+            for second_index in range(first_index + 1, len(merged)):
+                first = np.asarray(merged[first_index], dtype=float)
+                second = np.asarray(merged[second_index], dtype=float)
+                first_direction = _normalise(first[1] - first[0])
+                second_direction = _normalise(second[1] - second[0])
+                alignment = float(np.dot(first_direction, second_direction))
+                if alignment < 0.0:
+                    second_direction *= -1.0
+                    alignment *= -1.0
+                alignment = max(-1.0, min(1.0, alignment))
+                if math.acos(alignment) > maximum_angle:
+                    continue
+
+                axis = _normalise(first_direction + second_direction)
+                normal = np.array([-axis[1], axis[0]])
+                first_center = first.mean(axis=0)
+                second_center = second.mean(axis=0)
+                perpendicular_distance = abs(
+                    float(np.dot(second_center - first_center, normal))
+                )
+                if perpendicular_distance > parameters.wall_merge_distance:
+                    continue
+
+                first_projection = sorted(float(np.dot(point, axis)) for point in first)
+                second_projection = sorted(
+                    float(np.dot(point, axis)) for point in second
+                )
+                gap = max(
+                    0.0,
+                    second_projection[0] - first_projection[1],
+                    first_projection[0] - second_projection[1],
+                )
+                if gap > parameters.wall_merge_gap:
+                    continue
+
+                minimum = min(first_projection[0], second_projection[0])
+                maximum = max(first_projection[1], second_projection[1])
+                perpendicular = (
+                    float(np.dot(first_center, normal))
+                    + float(np.dot(second_center, normal))
+                ) * 0.5
+                start = axis * minimum + normal * perpendicular
+                end = axis * maximum + normal * perpendicular
+                merged[first_index] = (tuple(start), tuple(end))
+                del merged[second_index]
+                changed = True
+                break
+    return merged
+
+
+def extract_shapes(
     occupancy: np.ndarray,
     geometry: Geometry,
     parameters: Parameters = Parameters(),
-) -> tuple[list[np.ndarray], list[tuple[tuple[float, float], tuple[float, float]]]]:
-    """Mirror the C++ core algorithm for offline unit verification."""
+) -> ShapeExtraction:
+    """Mirror the C++ coarse-shape algorithm for offline verification."""
     binary = np.where(occupancy >= parameters.occupied_threshold, 255, 0).astype(
         np.uint8
     )
@@ -84,7 +173,6 @@ def extract_lines(
         binary.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
     simplified: list[np.ndarray] = []
-    lines: list[tuple[tuple[float, float], tuple[float, float]]] = []
     epsilon_pixels = parameters.contour_epsilon / geometry.resolution
 
     for contour in contours:
@@ -96,33 +184,108 @@ def extract_lines(
             continue
         simplified.append(approximation)
 
-        pairs = [(0, 1)] if len(approximation) == 2 else [
-            (index, (index + 1) % len(approximation))
-            for index in range(len(approximation))
-        ]
-        for start_index, end_index in pairs:
-            start = grid_to_world(tuple(approximation[start_index]), geometry)
-            end = grid_to_world(tuple(approximation[end_index]), geometry)
-            if math.dist(start, end) >= parameters.minimum_line_length:
-                lines.append((start, end))
+    component_count, labels, statistics, _ = cv2.connectedComponentsWithStats(
+        binary, connectivity=8, ltype=cv2.CV_32S
+    )
+    walls: list[Wall] = []
+    blocks: list[Block] = []
+    minimum_wall_length = max(
+        parameters.wall_min_length, parameters.minimum_line_length
+    )
+    for label in range(1, component_count):
+        cell_count = int(statistics[label, cv2.CC_STAT_AREA])
+        area = cell_count * geometry.resolution**2
+        if area < parameters.min_contour_area:
+            continue
+        rows, columns = np.nonzero(labels == label)
+        points = np.column_stack((columns, rows)).astype(np.float32)
+        if len(points) == 0:
+            continue
+        center, size, angle_degrees = cv2.minAreaRect(points)
+        width_pixels, height_pixels = size
+        angle = math.radians(angle_degrees)
+        width_axis = np.array([math.cos(angle), math.sin(angle)])
+        height_axis = np.array([-math.sin(angle), math.cos(angle)])
+        width_is_long = width_pixels >= height_pixels
+        major_axis = width_axis if width_is_long else height_axis
+        minor_axis = height_axis if width_is_long else width_axis
+        long_pixels = max(width_pixels, height_pixels) + 1.0
+        short_pixels = min(width_pixels, height_pixels) + 1.0
+        long_metres = long_pixels * geometry.resolution
+        short_metres = short_pixels * geometry.resolution
+        aspect_ratio = long_metres / max(short_metres, 1.0e-9)
+        center_point = np.asarray(center, dtype=float)
 
-    return simplified, lines
+        if (
+            long_metres >= minimum_wall_length
+            and aspect_ratio >= parameters.wall_min_aspect_ratio
+        ):
+            half = major_axis * long_pixels * 0.5
+            walls.append(
+                (
+                    grid_to_world(tuple(center_point - half), geometry),
+                    grid_to_world(tuple(center_point + half), geometry),
+                )
+            )
+            continue
+
+        block_long_pixels = (
+            max(long_metres, parameters.minimum_block_size) / geometry.resolution
+        )
+        block_short_pixels = (
+            max(short_metres, parameters.minimum_block_size) / geometry.resolution
+        )
+        major_half = major_axis * block_long_pixels * 0.5
+        minor_half = minor_axis * block_short_pixels * 0.5
+        blocks.append(
+            tuple(
+                grid_to_world(tuple(point), geometry)
+                for point in (
+                    center_point - major_half - minor_half,
+                    center_point + major_half - minor_half,
+                    center_point + major_half + minor_half,
+                    center_point - major_half + minor_half,
+                )
+            )
+        )
+
+    walls = _merge_walls(walls, parameters)
+    lines = list(walls)
+    for block in blocks:
+        lines.extend(
+            (block[index], block[(index + 1) % len(block)])
+            for index in range(len(block))
+        )
+    return ShapeExtraction(simplified, walls, blocks, lines)
+
+
+def extract_lines(
+    occupancy: np.ndarray,
+    geometry: Geometry,
+    parameters: Parameters = Parameters(),
+) -> tuple[list[np.ndarray], list[Wall]]:
+    """Compatibility wrapper returning flattened wall and rectangle edges."""
+    result = extract_shapes(occupancy, geometry, parameters)
+    return result.contours, result.lines
 
 
 class OfflineLineExtractorTests(unittest.TestCase):
     def test_long_wall(self) -> None:
         grid = np.zeros((60, 60), dtype=np.int8)
         grid[30:32, 5:55] = 100
-        _, lines = extract_lines(grid, Geometry(0.10, -3.0, -3.0))
-        self.assertTrue(lines)
-        self.assertGreaterEqual(max(math.dist(*line) for line in lines), 4.5)
+        result = extract_shapes(grid, Geometry(0.10, -3.0, -3.0))
+        self.assertEqual(len(result.wall_lines), 1)
+        self.assertEqual(result.blocks, [])
+        self.assertGreaterEqual(math.dist(*result.wall_lines[0]), 4.5)
 
     def test_square_obstacle(self) -> None:
         grid = np.zeros((40, 40), dtype=np.int8)
         grid[10:20, 10:20] = 100
-        contours, lines = extract_lines(grid, Geometry(0.10, -2.0, -2.0))
-        self.assertEqual(len(contours), 1)
-        self.assertEqual(len(lines), 4)
+        result = extract_shapes(grid, Geometry(0.10, -2.0, -2.0))
+        self.assertEqual(len(result.contours), 1)
+        self.assertEqual(result.wall_lines, [])
+        self.assertEqual(len(result.blocks), 1)
+        self.assertEqual(len(result.lines), 4)
 
     def test_isolated_noise_is_removed(self) -> None:
         grid = np.zeros((30, 30), dtype=np.int8)
@@ -138,6 +301,18 @@ class OfflineLineExtractorTests(unittest.TestCase):
         contours, lines = extract_lines(grid, Geometry(0.10, -2.5, -2.5))
         self.assertEqual(len(contours), 2)
         self.assertEqual(len(lines), 8)
+
+    def test_collinear_wall_fragments_are_merged(self) -> None:
+        grid = np.zeros((30, 60), dtype=np.int8)
+        grid[14:16, 5:25] = 100
+        grid[14:16, 28:50] = 100
+        result = extract_shapes(
+            grid,
+            Geometry(0.10),
+            Parameters(maximum_line_gap=0.0, wall_merge_gap=0.50),
+        )
+        self.assertEqual(len(result.wall_lines), 1)
+        self.assertGreater(math.dist(*result.wall_lines[0]), 4.0)
 
     def test_origin_resolution_and_yaw(self) -> None:
         world = grid_to_world(

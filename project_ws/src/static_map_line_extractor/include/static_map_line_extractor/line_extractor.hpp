@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <utility>
 #include <vector>
@@ -25,7 +26,13 @@ struct ExtractionParameters {
   double contour_epsilon{0.10};       // metres
   double minimum_line_length{0.30};   // metres
   double maximum_line_gap{0.20};      // metres, used for binary closing
-  int minimum_component_cells{3};
+  int minimum_component_cells{8};
+  double wall_min_length{1.20};        // metres
+  double wall_min_aspect_ratio{3.50};
+  double minimum_block_size{0.40};     // metres, visual minimum
+  double wall_merge_angle_degrees{12.0};
+  double wall_merge_distance{0.30};    // perpendicular metres
+  double wall_merge_gap{0.50};         // longitudinal metres
 };
 
 struct LineSegment {
@@ -35,17 +42,26 @@ struct LineSegment {
   double length() const;
 };
 
+/// Coarse oriented rectangle used for compact static clusters.
+struct OrientedBlock {
+  std::array<cv::Point2d, 4> corners;
+};
+
 struct ExtractionResult {
   cv::Mat cleaned_binary;
   std::vector<std::vector<cv::Point>> simplified_contours;
+  std::vector<LineSegment> wall_lines;
+  std::vector<OrientedBlock> blocks;
+  /// Compatibility output: wall lines followed by four edges per block.
   std::vector<LineSegment> lines;
 };
 
 /**
- * Convert occupied cells into simplified contour edges.
+ * Convert occupied cells into coarse, presentation-friendly map shapes.
  *
- * This class has no rclcpp or ROS message dependency. The ROS node is only an
- * adapter around it, which keeps image processing independently testable.
+ * Long, narrow components become one wall centreline. Compact components
+ * become oriented rectangles. Nearby collinear wall fragments are merged.
+ * The class has no rclcpp or ROS message dependency.
  */
 class LineExtractor {
  public:
@@ -64,6 +80,11 @@ class LineExtractor {
   cv::Mat remove_small_components(const cv::Mat &binary) const;
   std::vector<std::vector<cv::Point>> find_simplified_contours(
       const cv::Mat &binary, double resolution) const;
+  void classify_components(const cv::Mat &binary,
+                           const GridGeometry &geometry,
+                           ExtractionResult &result) const;
+  std::vector<LineSegment> merge_wall_lines(
+      std::vector<LineSegment> walls) const;
 
   ExtractionParameters parameters_;
 };

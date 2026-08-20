@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare line-extraction parameter presets on identical real-MCAP grids."""
+"""Compare coarse-shape parameter presets on identical real-MCAP grids."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ try:
     import matplotlib.pyplot as plt
     import numpy as np
     from matplotlib.collections import LineCollection
+    from matplotlib.patches import Polygon
     from mcap_ros2.reader import read_ros2_messages
 except ImportError as error:  # pragma: no cover
     raise SystemExit(
@@ -44,25 +45,42 @@ COMMON_LINE_DEFAULTS = {
     "occupied_threshold": 100,
     "min_contour_area": 0.0,
     "maximum_line_gap": 0.20,
-    "line_width": 0.04,
     "update_period": 0.20,
 }
 
 PRESETS = {
-    "Current": {
+    "Detailed": {
         "minimum_line_length": 0.30,
-        "minimum_component_cells": 3,
-        "contour_epsilon": 0.10,
-    },
-    "Mild": {
-        "minimum_line_length": 0.50,
         "minimum_component_cells": 5,
-        "contour_epsilon": 0.15,
+        "contour_epsilon": 0.10,
+        "wall_min_length": 1.00,
+        "wall_min_aspect_ratio": 3.00,
+        "minimum_block_size": 0.35,
+        "wall_merge_angle_degrees": 8.0,
+        "wall_merge_distance": 0.20,
+        "wall_merge_gap": 0.30,
     },
-    "Clean": {
-        "minimum_line_length": 0.50,
+    "Balanced": {
+        "minimum_line_length": 0.30,
         "minimum_component_cells": 8,
+        "contour_epsilon": 0.10,
+        "wall_min_length": 1.20,
+        "wall_min_aspect_ratio": 3.50,
+        "minimum_block_size": 0.40,
+        "wall_merge_angle_degrees": 12.0,
+        "wall_merge_distance": 0.30,
+        "wall_merge_gap": 0.50,
+    },
+    "Minimal": {
+        "minimum_line_length": 0.50,
+        "minimum_component_cells": 12,
         "contour_epsilon": 0.20,
+        "wall_min_length": 1.50,
+        "wall_min_aspect_ratio": 4.00,
+        "minimum_block_size": 0.50,
+        "wall_merge_angle_degrees": 15.0,
+        "wall_merge_distance": 0.35,
+        "wall_merge_gap": 0.70,
     },
 }
 
@@ -79,7 +97,7 @@ def load_module(name: str, path: Path) -> ModuleType:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compare Current, Mild, and Clean on real LiDAR MCAP files."
+        description="Compare Detailed, Balanced, and Minimal coarse shapes."
     )
     parser.add_argument("mcap", nargs="+", type=Path)
     parser.add_argument("--topic", default="/velodyne_points_wifi")
@@ -226,7 +244,7 @@ def extract_preset(
     preset_name: str,
     preset: dict[str, Any],
     line_module: ModuleType,
-) -> tuple[list[Any], list[Any], dict[str, Any]]:
+) -> tuple[Any, dict[str, Any]]:
     occupancy = np.where(static_mask, 100, 0).astype(np.int8)
     parameters = line_module.Parameters(
         occupied_threshold=COMMON_LINE_DEFAULTS["occupied_threshold"],
@@ -235,6 +253,12 @@ def extract_preset(
         minimum_line_length=preset["minimum_line_length"],
         maximum_line_gap=COMMON_LINE_DEFAULTS["maximum_line_gap"],
         minimum_component_cells=preset["minimum_component_cells"],
+        wall_min_length=preset["wall_min_length"],
+        wall_min_aspect_ratio=preset["wall_min_aspect_ratio"],
+        minimum_block_size=preset["minimum_block_size"],
+        wall_merge_angle_degrees=preset["wall_merge_angle_degrees"],
+        wall_merge_distance=preset["wall_merge_distance"],
+        wall_merge_gap=preset["wall_merge_gap"],
     )
     geometry = line_module.Geometry(
         resolution=PROJECTOR_DEFAULTS["voxel_size_xy"],
@@ -242,21 +266,23 @@ def extract_preset(
         origin_y=-PROJECTOR_DEFAULTS["max_range"],
         origin_yaw=0.0,
     )
-    contours, lines = line_module.extract_lines(occupancy, geometry, parameters)
-    lengths = [math.dist(line[0], line[1]) for line in lines]
+    shapes = line_module.extract_shapes(occupancy, geometry, parameters)
+    lengths = [math.dist(line[0], line[1]) for line in shapes.wall_lines]
     metrics = {
         "preset": preset_name,
         **COMMON_LINE_DEFAULTS,
         **preset,
-        "contours": len(contours),
-        "line_segments": len(lines),
+        "components": len(shapes.contours),
+        "walls": len(shapes.wall_lines),
+        "blocks": len(shapes.blocks),
+        "line_segments": len(shapes.lines),
         "removed_small_components": removed_small_component_count(
             occupancy, preset["minimum_component_cells"]
         ),
         "mean_line_length": float(np.mean(lengths)) if lengths else 0.0,
         "max_line_length": max(lengths, default=0.0),
     }
-    return contours, lines, metrics
+    return shapes, metrics
 
 
 def draw_sensor(ax: Any) -> None:
@@ -328,21 +354,31 @@ def add_lines(ax: Any, lines: list[Any], color: str) -> None:
         )
 
 
-def plot_lines(
-    ax: Any,
-    lines: list[Any],
-    title: str,
-    *,
-    color: str = "#007c91",
-) -> None:
-    add_lines(ax, lines, color)
+def add_shapes(ax: Any, shapes: Any) -> None:
+    add_lines(ax, shapes.wall_lines, "#00869a")
+    for block in shapes.blocks:
+        ax.add_patch(
+            Polygon(
+                block,
+                closed=True,
+                facecolor="#f2c078",
+                edgecolor="#d7863a",
+                linewidth=1.2,
+                alpha=0.42,
+                zorder=5,
+            )
+        )
+
+
+def plot_shapes(ax: Any, shapes: Any, title: str) -> None:
+    add_shapes(ax, shapes)
     style_axes(ax, title)
 
 
 def save_preset_images(
     output_dir: Path,
     static_mask: np.ndarray,
-    lines: list[Any],
+    shapes: Any,
     preset_name: str,
     metrics: dict[str, Any],
 ) -> dict[str, str]:
@@ -353,8 +389,8 @@ def save_preset_images(
         "grid_lines_overlay": output_dir / "grid_lines_overlay.png",
     }
     subtitle = (
-        f"{preset_name}: contours={metrics['contours']}, "
-        f"lines={metrics['line_segments']}, "
+        f"{preset_name}: components={metrics['components']}, "
+        f"walls={metrics['walls']}, blocks={metrics['blocks']}, "
         f"removed={metrics['removed_small_components']}"
     )
 
@@ -365,14 +401,14 @@ def save_preset_images(
     plt.close(figure)
 
     figure, ax = plt.subplots(figsize=(9, 8), constrained_layout=True)
-    plot_lines(ax, lines, "Extracted lines")
+    plot_shapes(ax, shapes, "Coarse walls and blocks")
     figure.suptitle(subtitle, fontsize=10)
     figure.savefig(paths["extracted_lines"], dpi=200)
     plt.close(figure)
 
     figure, ax = plt.subplots(figsize=(9, 8), constrained_layout=True)
-    plot_grid(ax, static_mask, "Static grid + extracted lines")
-    add_lines(ax, lines, "#d62728")
+    plot_grid(ax, static_mask, "Static grid + coarse shapes")
+    add_shapes(ax, shapes)
     figure.suptitle(subtitle, fontsize=10)
     figure.savefig(paths["grid_lines_overlay"], dpi=200)
     plt.close(figure)
@@ -382,22 +418,21 @@ def save_preset_images(
 def save_comparison(
     path: Path,
     static_mask: np.ndarray,
-    results: list[tuple[str, list[Any], dict[str, Any]]],
+    results: list[tuple[str, Any, dict[str, Any]]],
     bag_name: str,
 ) -> None:
-    colors = {"Current": "#007c91", "Mild": "#e17c05", "Clean": "#2a7f3e"}
     figure, axes = plt.subplots(1, 3, figsize=(22, 7.2), constrained_layout=True)
-    for ax, (name, lines, metrics) in zip(axes, results):
+    for ax, (name, shapes, metrics) in zip(axes, results):
         plot_grid(ax, static_mask, name)
-        add_lines(ax, lines, colors[name])
+        add_shapes(ax, shapes)
         ax.set_title(
-            f"{name}\ncontours={metrics['contours']}  "
-            f"lines={metrics['line_segments']}  "
+            f"{name}\ncomponents={metrics['components']}  "
+            f"walls={metrics['walls']}  blocks={metrics['blocks']}  "
             f"removed={metrics['removed_small_components']}\n"
             f"mean={metrics['mean_line_length']:.2f} m  "
             f"max={metrics['max_line_length']:.2f} m"
         )
-    figure.suptitle(f"{bag_name}: Current / Mild / Clean", fontsize=11)
+    figure.suptitle(f"{bag_name}: Detailed / Balanced / Minimal", fontsize=11)
     path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(path, dpi=180)
     plt.close(figure)
@@ -409,7 +444,9 @@ def write_metrics(output_root: Path, rows: list[dict[str, Any]]) -> None:
     csv_path = output_root / "preset_metrics.csv"
     if rows:
         with csv_path.open("w", newline="", encoding="utf-8") as file:
-            writer = csv.DictWriter(file, fieldnames=list(rows[0].keys()))
+            writer = csv.DictWriter(
+                file, fieldnames=list(rows[0].keys()), lineterminator="\n"
+            )
             writer.writeheader()
             writer.writerows(rows)
 
@@ -435,13 +472,13 @@ def main() -> int:
         bag_dir = args.output_root / mcap_path.stem
         comparison_results = []
         for preset_name, preset in PRESETS.items():
-            _, lines, metrics = extract_preset(
+            shapes, metrics = extract_preset(
                 static_mask, preset_name, preset, line_module
             )
             images = save_preset_images(
                 bag_dir / preset_name.lower(),
                 static_mask,
-                lines,
+                shapes,
                 preset_name,
                 metrics,
             )
@@ -451,7 +488,7 @@ def main() -> int:
                 **metrics,
             }
             all_rows.append(row)
-            comparison_results.append((preset_name, lines, metrics))
+            comparison_results.append((preset_name, shapes, metrics))
             (bag_dir / preset_name.lower() / "metrics.json").write_text(
                 json.dumps({**bag_metadata, **row, "images": images}, indent=2),
                 encoding="utf-8",

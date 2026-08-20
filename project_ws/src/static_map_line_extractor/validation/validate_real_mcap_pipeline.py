@@ -24,6 +24,7 @@ try:
     import matplotlib.pyplot as plt
     import numpy as np
     from matplotlib.collections import LineCollection
+    from matplotlib.patches import Polygon
     from mcap_ros2.reader import read_ros2_messages
 except ImportError as error:  # pragma: no cover
     raise SystemExit(
@@ -49,8 +50,15 @@ LINE_PARAMETERS = {
     "contour_epsilon": 0.10,
     "minimum_line_length": 0.30,
     "maximum_line_gap": 0.20,
-    "minimum_component_cells": 3,
-    "line_width": 0.04,
+    "minimum_component_cells": 8,
+    "wall_min_length": 1.20,
+    "wall_min_aspect_ratio": 3.50,
+    "minimum_block_size": 0.40,
+    "wall_merge_angle_degrees": 12.0,
+    "wall_merge_distance": 0.30,
+    "wall_merge_gap": 0.50,
+    "wall_line_width": 0.12,
+    "block_line_width": 0.07,
     "update_period": 0.20,
 }
 
@@ -156,23 +164,40 @@ def plot_grid(ax: Any, static_mask: np.ndarray) -> None:
     style_axes(ax, "Static occupancy grid")
 
 
-def plot_lines(ax: Any, lines: list[Any], *, overlay: bool = False) -> None:
-    if lines:
+def plot_shapes(
+    ax: Any, walls: list[Any], blocks: list[Any], *, overlay: bool = False
+) -> None:
+    if walls:
         collection = LineCollection(
-            [[line[0], line[1]] for line in lines],
+            [[line[0], line[1]] for line in walls],
             colors="#d62728" if overlay else "#007c91",
-            linewidths=1.3 if overlay else 1.6,
+            linewidths=2.4 if overlay else 3.2,
             zorder=6,
         )
         ax.add_collection(collection)
-    style_axes(ax, "Static grid + extracted lines" if overlay else "Extracted lines")
+    for block in blocks:
+        patch = Polygon(
+            block,
+            closed=True,
+            facecolor="#d99032" if not overlay else "none",
+            edgecolor="#b85c1e" if not overlay else "#d62728",
+            linewidth=1.7 if not overlay else 1.2,
+            alpha=0.28 if not overlay else 0.9,
+            zorder=5,
+        )
+        ax.add_patch(patch)
+    style_axes(
+        ax,
+        "Static grid + coarse shapes" if overlay else "Coarse walls and blocks",
+    )
 
 
 def save_images(
     output_dir: Path,
     raw_xy: np.ndarray,
     static_mask: np.ndarray,
-    lines: list[Any],
+    walls: list[Any],
+    blocks: list[Any],
     floor_z: float,
 ) -> dict[str, str]:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -199,7 +224,7 @@ def save_images(
     plt.close(figure)
 
     figure, ax = plt.subplots(figsize=(9, 8), constrained_layout=True)
-    plot_lines(ax, lines)
+    plot_shapes(ax, walls, blocks)
     figure.suptitle(subtitle, fontsize=10)
     figure.savefig(paths["static_map_lines"], dpi=200)
     plt.close(figure)
@@ -207,15 +232,15 @@ def save_images(
     figure, axes = plt.subplots(1, 3, figsize=(22, 7.2), constrained_layout=True)
     plot_raw(axes[0], raw_xy)
     plot_grid(axes[1], static_mask)
-    plot_lines(axes[2], lines)
+    plot_shapes(axes[2], walls, blocks)
     figure.suptitle(subtitle, fontsize=11)
     figure.savefig(paths["static_map_comparison"], dpi=180)
     plt.close(figure)
 
     figure, ax = plt.subplots(figsize=(9, 8), constrained_layout=True)
     plot_grid(ax, static_mask)
-    plot_lines(ax, lines, overlay=True)
-    ax.set_title("Static occupancy grid with extracted lines")
+    plot_shapes(ax, walls, blocks, overlay=True)
+    ax.set_title("Static occupancy grid with coarse shapes")
     figure.suptitle(subtitle, fontsize=10)
     figure.savefig(paths["static_grid_with_lines"], dpi=200)
     plt.close(figure)
@@ -260,6 +285,8 @@ def validate_one(
     frame_id = ""
     latest_contours: list[Any] = []
     latest_lines: list[Any] = []
+    latest_walls: list[Any] = []
+    latest_blocks: list[Any] = []
 
     line_parameters = line_extractor.Parameters(
         occupied_threshold=LINE_PARAMETERS["occupied_threshold"],
@@ -268,6 +295,12 @@ def validate_one(
         minimum_line_length=LINE_PARAMETERS["minimum_line_length"],
         maximum_line_gap=LINE_PARAMETERS["maximum_line_gap"],
         minimum_component_cells=LINE_PARAMETERS["minimum_component_cells"],
+        wall_min_length=LINE_PARAMETERS["wall_min_length"],
+        wall_min_aspect_ratio=LINE_PARAMETERS["wall_min_aspect_ratio"],
+        minimum_block_size=LINE_PARAMETERS["minimum_block_size"],
+        wall_merge_angle_degrees=LINE_PARAMETERS["wall_merge_angle_degrees"],
+        wall_merge_distance=LINE_PARAMETERS["wall_merge_distance"],
+        wall_merge_gap=LINE_PARAMETERS["wall_merge_gap"],
     )
     geometry = line_extractor.Geometry(
         resolution=resolution,
@@ -355,9 +388,13 @@ def validate_one(
         occupancy = np.where(
             scores >= PROJECTOR_PARAMETERS["static_observation_threshold"], 100, 0
         ).astype(np.int8)
-        latest_contours, latest_lines = line_extractor.extract_lines(
+        shape_result = line_extractor.extract_shapes(
             occupancy, geometry, line_parameters
         )
+        latest_contours = shape_result.contours
+        latest_walls = shape_result.wall_lines
+        latest_blocks = shape_result.blocks
+        latest_lines = shape_result.lines
 
     if messages_decoded == 0:
         raise RuntimeError(f"No PointCloud2 messages found on {topic}")
@@ -370,7 +407,9 @@ def validate_one(
         if raw_frames
         else np.empty((0, 2), dtype=np.float32)
     )
-    images = save_images(output_dir, raw_xy, static_mask, latest_lines, floor_z)
+    images = save_images(
+        output_dir, raw_xy, static_mask, latest_walls, latest_blocks, floor_z
+    )
 
     summary = {
         "bag_file": str(mcap_path.resolve()),
@@ -389,6 +428,8 @@ def validate_one(
         "grid_resolution": resolution,
         "static_cells": int(static_mask.sum()),
         "contours": len(latest_contours),
+        "wall_count": len(latest_walls),
+        "block_count": len(latest_blocks),
         "line_segments": len(latest_lines),
         "projector_parameters": PROJECTOR_PARAMETERS,
         "line_extractor_parameters": LINE_PARAMETERS,
