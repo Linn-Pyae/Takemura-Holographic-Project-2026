@@ -1,0 +1,10 @@
+bag,static_cells,preset,occupied_threshold,min_contour_area,maximum_line_gap,line_width,update_period,minimum_line_length,minimum_component_cells,contour_epsilon,contours,line_segments,removed_small_components,mean_line_length,max_line_length
+lidar_sample_0.mcap,364,Current,100,0.0,0.2,0.04,0.2,0.3,3,0.1,18,46,17,1.067455610532982,5.603570290448761
+lidar_sample_0.mcap,364,Mild,100,0.0,0.2,0.04,0.2,0.5,5,0.15,11,22,24,1.7633159755953416,5.807753438292642
+lidar_sample_0.mcap,364,Clean,100,0.0,0.2,0.04,0.2,0.5,8,0.2,10,22,25,1.807082442354841,6.013318551349164
+lidar_sample_2_0.mcap,584,Current,100,0.0,0.2,0.04,0.2,0.3,3,0.1,35,88,31,0.7337024330223921,4.070626487409525
+lidar_sample_2_0.mcap,584,Mild,100,0.0,0.2,0.04,0.2,0.5,5,0.15,28,43,38,1.1888624352386157,4.5617978911828185
+lidar_sample_2_0.mcap,584,Clean,100,0.0,0.2,0.04,0.2,0.5,8,0.2,20,39,46,1.2912342110893977,4.5617978911828185
+lidar_sample_3_0.mcap,328,Current,100,0.0,0.2,0.04,0.2,0.3,3,0.1,11,33,7,1.0826492078976364,5.032891812864648
+lidar_sample_3_0.mcap,328,Mild,100,0.0,0.2,0.04,0.2,0.5,5,0.15,10,20,8,1.597399239350689,4.675467891024383
+lidar_sample_3_0.mcap,328,Clean,100,0.0,0.2,0.04,0.2,0.5,8,0.2,9,19,9,1.6089222231258251,6.23698645180507

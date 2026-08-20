@@ -1,0 +1,143 @@
+[
+  {
+    "bag_file": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\lidar_sample\\lidar_sample_0.mcap",
+    "topic": "/velodyne_points_wifi",
+    "message_type": "sensor_msgs/msg/PointCloud2",
+    "frame_id": "velodyne",
+    "messages_decoded": 155,
+    "projector_frames_used": 102,
+    "mapping_frames_after_floor_warmup": 88,
+    "line_extractor_updates": 88,
+    "total_points": 620000,
+    "points_in_projector_frames": 408000,
+    "invalid_points_in_projector_frames": 0,
+    "estimated_floor_z": -1.125,
+    "filtered_points": 177757,
+    "grid_resolution": 0.1,
+    "static_cells": 364,
+    "contours": 18,
+    "line_segments": 46,
+    "projector_parameters": {
+      "auto_floor": true,
+      "floor_z_fallback": -0.85,
+      "min_height_above_floor": 0.3,
+      "max_height_above_floor": 2.0,
+      "max_range": 15.0,
+      "voxel_size_xy": 0.1,
+      "static_observation_threshold": 5,
+      "map_update_period": 0.2
+    },
+    "line_extractor_parameters": {
+      "occupied_threshold": 100,
+      "min_contour_area": 0.0,
+      "contour_epsilon": 0.1,
+      "minimum_line_length": 0.3,
+      "maximum_line_gap": 0.2,
+      "minimum_component_cells": 3,
+      "line_width": 0.04,
+      "update_period": 0.2
+    },
+    "images": {
+      "raw_xy_projection": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\output\\lidar_sample_0\\raw_xy_projection.png",
+      "static_occupancy_grid": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\output\\lidar_sample_0\\static_occupancy_grid.png",
+      "static_map_lines": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\output\\lidar_sample_0\\static_map_lines.png",
+      "static_map_comparison": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\output\\lidar_sample_0\\static_map_comparison.png",
+      "static_grid_with_lines": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\output\\lidar_sample_0\\static_grid_with_lines.png"
+    },
+    "summary_json": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\output\\lidar_sample_0\\validation_summary.json"
+  },
+  {
+    "bag_file": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\lidar_sample_2\\lidar_sample_2_0.mcap",
+    "topic": "/velodyne_points_wifi",
+    "message_type": "sensor_msgs/msg/PointCloud2",
+    "frame_id": "velodyne",
+    "messages_decoded": 148,
+    "projector_frames_used": 95,
+    "mapping_frames_after_floor_warmup": 81,
+    "line_extractor_updates": 81,
+    "total_points": 592000,
+    "points_in_projector_frames": 380000,
+    "invalid_points_in_projector_frames": 0,
+    "estimated_floor_z": -1.8249999999999997,
+    "filtered_points": 176745,
+    "grid_resolution": 0.1,
+    "static_cells": 584,
+    "contours": 35,
+    "line_segments": 88,
+    "projector_parameters": {
+      "auto_floor": true,
+      "floor_z_fallback": -0.85,
+      "min_height_above_floor": 0.3,
+      "max_height_above_floor": 2.0,
+      "max_range": 15.0,
+      "voxel_size_xy": 0.1,
+      "static_observation_threshold": 5,
+      "map_update_period": 0.2
+    },
+    "line_extractor_parameters": {
+      "occupied_threshold": 100,
+      "min_contour_area": 0.0,
+      "contour_epsilon": 0.1,
+      "minimum_line_length": 0.3,
+      "maximum_line_gap": 0.2,
+      "minimum_component_cells": 3,
+      "line_width": 0.04,
+      "update_period": 0.2
+    },
+    "images": {
+      "raw_xy_projection": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\output\\lidar_sample_2_0\\raw_xy_projection.png",
+      "static_occupancy_grid": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\output\\lidar_sample_2_0\\static_occupancy_grid.png",
+      "static_map_lines": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\output\\lidar_sample_2_0\\static_map_lines.png",
+      "static_map_comparison": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\output\\lidar_sample_2_0\\static_map_comparison.png",
+      "static_grid_with_lines": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\output\\lidar_sample_2_0\\static_grid_with_lines.png"
+    },
+    "summary_json": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\output\\lidar_sample_2_0\\validation_summary.json"
+  },
+  {
+    "bag_file": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\lidar_sample_3\\lidar_sample_3_0.mcap",
+    "topic": "/velodyne_points_wifi",
+    "message_type": "sensor_msgs/msg/PointCloud2",
+    "frame_id": "velodyne",
+    "messages_decoded": 123,
+    "projector_frames_used": 84,
+    "mapping_frames_after_floor_warmup": 70,
+    "line_extractor_updates": 70,
+    "total_points": 492000,
+    "points_in_projector_frames": 336000,
+    "invalid_points_in_projector_frames": 0,
+    "estimated_floor_z": -1.275,
+    "filtered_points": 202871,
+    "grid_resolution": 0.1,
+    "static_cells": 328,
+    "contours": 11,
+    "line_segments": 33,
+    "projector_parameters": {
+      "auto_floor": true,
+      "floor_z_fallback": -0.85,
+      "min_height_above_floor": 0.3,
+      "max_height_above_floor": 2.0,
+      "max_range": 15.0,
+      "voxel_size_xy": 0.1,
+      "static_observation_threshold": 5,
+      "map_update_period": 0.2
+    },
+    "line_extractor_parameters": {
+      "occupied_threshold": 100,
+      "min_contour_area": 0.0,
+      "contour_epsilon": 0.1,
+      "minimum_line_length": 0.3,
+      "maximum_line_gap": 0.2,
+      "minimum_component_cells": 3,
+      "line_width": 0.04,
+      "update_period": 0.2
+    },
+    "images": {
+      "raw_xy_projection": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\output\\lidar_sample_3_0\\raw_xy_projection.png",
+      "static_occupancy_grid": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\output\\lidar_sample_3_0\\static_occupancy_grid.png",
+      "static_map_lines": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\output\\lidar_sample_3_0\\static_map_lines.png",
+      "static_map_comparison": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\output\\lidar_sample_3_0\\static_map_comparison.png",
+      "static_grid_with_lines": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\output\\lidar_sample_3_0\\static_grid_with_lines.png"
+    },
+    "summary_json": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\output\\lidar_sample_3_0\\validation_summary.json"
+  }
+]

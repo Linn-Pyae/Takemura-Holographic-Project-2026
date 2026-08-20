@@ -1,0 +1,31 @@
+{
+  "bag_file": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\lidar_sample_3\\lidar_sample_3_0.mcap",
+  "messages": 123,
+  "projector_frames": 84,
+  "mapping_frames": 70,
+  "total_points": 492000,
+  "filtered_points": 202871,
+  "estimated_floor_z": -1.275,
+  "grid_resolution": 0.1,
+  "static_cells": 328,
+  "bag": "lidar_sample_3_0.mcap",
+  "preset": "Current",
+  "occupied_threshold": 100,
+  "min_contour_area": 0.0,
+  "maximum_line_gap": 0.2,
+  "line_width": 0.04,
+  "update_period": 0.2,
+  "minimum_line_length": 0.3,
+  "minimum_component_cells": 3,
+  "contour_epsilon": 0.1,
+  "contours": 11,
+  "line_segments": 33,
+  "removed_small_components": 7,
+  "mean_line_length": 1.0826492078976364,
+  "max_line_length": 5.032891812864648,
+  "images": {
+    "static_occupancy_grid": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\preset_comparison\\output\\lidar_sample_3_0\\current\\static_occupancy_grid.png",
+    "extracted_lines": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\preset_comparison\\output\\lidar_sample_3_0\\current\\extracted_lines.png",
+    "grid_lines_overlay": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_line_extractor\\validation\\preset_comparison\\output\\lidar_sample_3_0\\current\\grid_lines_overlay.png"
+  }
+}
