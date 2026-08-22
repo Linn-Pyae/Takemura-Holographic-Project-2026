@@ -1,4 +1,4 @@
-"""外部I/Oや描画に依存しないMulti-Object Tracking本体。"""
+"""Multi-object tracking core with no dependency on external I/O or rendering."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ DEFAULT_NAMES = (
 
 
 class AssociationStrategy(Protocol):
-    """対応付けアルゴリズムの差し替え口（将来のHungarian法向け）。"""
+    """Pluggable association algorithm interface (e.g. Hungarian matching)."""
 
     def associate(
         self,
@@ -45,12 +45,12 @@ class AssociationStrategy(Protocol):
         max_distance: float,
         predicted_positions: Sequence[Position2D] | None = None,
     ) -> tuple[list[tuple[int, int]], set[int], set[int]]:
-        """(track index, detection index)と未対応index群を返す。"""
+        """Return (track index, detection index) matches and unmatched index sets."""
 
 
 @dataclass(frozen=True)
 class GreedyNearestNeighborMatcher:
-    """距離の短い候補ペアから重複なしで採用する簡易対応付け。"""
+    """Greedy association: accept shortest-distance pairs without reuse."""
 
     use_velocity_prediction: bool = True
 
@@ -99,10 +99,10 @@ class GreedyNearestNeighborMatcher:
 
 @dataclass(frozen=True)
 class HungarianMatcher:
-    """全体の距離コストを最小化するHungarian Algorithm対応付け。
+    """Hungarian Algorithm association that minimizes total distance cost.
 
-    距離ゲート外の組み合わせは無効とし、Track/Detectionの未対応を表す
-    ダミー行・列を加えた正方コスト行列を解く。
+    Pairs outside the distance gate are forbidden. Dummy rows and columns are
+    added so tracks and detections may remain unmatched.
     """
 
     use_velocity_prediction: bool = True
@@ -113,14 +113,14 @@ class HungarianMatcher:
 
     @staticmethod
     def _solve(cost: Sequence[Sequence[float]]) -> list[int]:
-        """Kuhn-Munkres法で各行に割り当てる列indexを返す。"""
+        """Kuhn-Munkres: return the assigned column index for each row."""
         size = len(cost)
         if size == 0:
             return []
         if any(len(row) != size for row in cost):
             raise ValueError("Hungarian cost matrix must be square")
 
-        # 1-indexed potentials implementation。O(n^3)。
+        # 1-indexed potentials implementation; O(n^3).
         u = [0.0] * (size + 1)
         v = [0.0] * (size + 1)
         p = [0] * (size + 1)
@@ -206,7 +206,7 @@ class HungarianMatcher:
                 for detection in detections
             ])
 
-        # 実Trackと実Detectionに加え、双方の未対応を選べるダミー領域を作る。
+        # Real tracks/detections plus dummy blocks so either side may stay unmatched.
         size = track_count + detection_count
         unmatched_cost = max_distance + 1.0
         forbidden_cost = unmatched_cost * (size + 1) * 10.0
@@ -222,7 +222,7 @@ class HungarianMatcher:
         for row in range(track_count, size):
             for column in range(detection_count):
                 cost[row][column] = unmatched_cost
-            # dummy-to-dummyは0のまま。
+            # dummy-to-dummy stays 0.
 
         assignment = self._solve(cost)
         matches: list[tuple[int, int]] = []
@@ -257,7 +257,7 @@ class TrackerConfig:
 
 
 class MultiObjectTracker:
-    """Detection列を受け取り、現在有効なTrack列を返す状態ful tracker。"""
+    """Stateful tracker: accept detections for a frame, return active tracks."""
 
     def __init__(
         self,
@@ -277,7 +277,7 @@ class MultiObjectTracker:
 
     @property
     def tracks(self) -> tuple[Track, ...]:
-        """呼び出し側がTrack一覧そのものを置換しないようtupleで公開する。"""
+        """Expose tracks as a tuple so callers cannot replace the list itself."""
         return tuple(self._tracks)
 
     def _new_name(self, track_id: int) -> str:
@@ -312,7 +312,7 @@ class MultiObjectTracker:
         return track
 
     def update(self, detections: Sequence[Detection]) -> tuple[Track, ...]:
-        """1フレーム分を処理する。入力順は新規Trackの命名順にのみ影響する。"""
+        """Process one frame. Input order only affects naming order of new tracks."""
         detections = tuple(detections)
         if not all(isinstance(item, Detection) for item in detections):
             raise TypeError("all items must be Detection instances; use an adapter first")

@@ -320,17 +320,48 @@ sudo systemctl restart takemura-map
 
 ## Implementation Details
 
-Placeholder
-
----
 
 
+### 1. Person Cluster Node
+
+A ROS2 node that detects walking people from a Velodyne LiDAR point cloud and publishes their positions as a `PoseArray`. Built for a fixed, stationary sensor (e.g. wall/ceiling mounted), not a moving robot platform.
+
+#### 1.1 Overview
+
+The node distinguishes people from static clutter (walls, furniture, equipment) using a background subtraction model, then filters detected blobs by human body shape, and finally requires a blob to demonstrate real movement over several frames before it's reported. This suppresses both static objects and single-frame sensor noise.
+
+**Input:** `/velodyne_points_bag` (`sensor_msgs/msg/PointCloud2`)
+**Output:** `/person_detections` (`geometry_msgs/msg/PoseArray`)
+
+#### 1.2 Pipeline Explanation
+
+[Person cluster pipeline](project_ws/src/person_cluster/src/README.md)
+
+### 2. Person Tracker
+
+A ROS 2 node (`track_node.py`) that turns anonymous detection centroids into stable tracks with IDs and display names. Matching uses the Hungarian algorithm; motion prediction uses a constant-velocity Kalman filter (`motion.py`).
+
+**Input:** `/person_detections` (`geometry_msgs/msg/PoseArray`)  
+**Output:** `/person_tracks` (`PoseArray`), `/person_tracks_info` (JSON names / IDs)
+
+#### 2.1 Pipeline Explanation
+
+[Multi-object tracker](project_ws/src/person_tracker/person_tracker/mot/README.md)
+
+### 3. Map Renderer
+
+Raylib parchment map that places distance-spaced, fading footprints from live Unix-socket person updates (or a demo track when IPC is unavailable).
+
+#### 3.1 Pipeline Explanation
+
+[Map renderer](map_renderer/src/README.md)
 
 ## Results
 
 Placeholder
 
 ---
+
 
 
 ## Acknowledgments
