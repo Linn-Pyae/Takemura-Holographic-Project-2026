@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstdint>
 #include <deque>
+#include <fstream>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -54,6 +55,12 @@ struct ClusterShape {
   float range{0.0f};       // horizontal distance from sensor [m]
   float verticality{0.0f}; // |principal axis . z|, 1.0 = upright
   std::size_t points{0};
+
+  // Kidono-style discriminative features (all computed from XYZ only).
+  float eig_width_ratio{1.0f}; // lambda2 / lambda1: horizontal spread vs height
+  float eig_depth_ratio{1.0f}; // lambda3 / lambda2: flatness in horizontal plane
+  float slice_occupancy{1.0f}; // fraction of vertical slices with >= min points
+  float slice_peak{1.0f};      // largest slice point fraction (concentration)
 };
 
 /// A blob that has been seen for a while, used to tell walkers from
@@ -125,6 +132,20 @@ public:
         declare_parameter<double>("points_at_one_meter", 45.0);
     min_points_floor_ = declare_parameter<int>("min_points_floor", 5);
 
+    // Kidono-style shape gates. A value of 0.0 disables the corresponding
+    // gate, so the node keeps its pre-feature behaviour until tuned.
+    max_aspect_ratio_ = declare_parameter<double>("max_aspect_ratio", 0.0);
+    max_eig_width_ratio_ =
+        declare_parameter<double>("max_eig_width_ratio", 0.0);
+    min_eig_depth_ratio_ =
+        declare_parameter<double>("min_eig_depth_ratio", 0.0);
+    n_slices_ = declare_parameter<int>("n_slices", 10);
+    slice_min_points_ = declare_parameter<int>("slice_min_points", 1);
+    min_slice_occupancy_ =
+        declare_parameter<double>("min_slice_occupancy", 0.0);
+    feature_dump_path_ =
+        declare_parameter<std::string>("feature_dump_path", "");
+
     assoc_radius_ = declare_parameter<double>("assoc_radius", 0.70);
     history_frames_ = declare_parameter<int>("history_frames", 10);
     move_distance_m_ = declare_parameter<double>("move_distance_m", 0.35);
@@ -134,6 +155,20 @@ public:
     require_motion_ = declare_parameter<bool>("require_motion", true);
     debug_stats_ = declare_parameter<bool>("debug_stats", true);
     process_period_ = declare_parameter<double>("process_period", 0.12);
+
+    if (!feature_dump_path_.empty()) {
+      dump_.open(feature_dump_path_, std::ios::out | std::ios::app);
+      if (dump_.is_open()) {
+        dump_ << "frame,human,cx,cy,cz,points,range,height,width,aspect,"
+                 "verticality,eig_width_ratio,eig_depth_ratio,"
+                 "slice_occupancy,slice_peak\n";
+        RCLCPP_INFO(get_logger(), "dumping cluster features to %s",
+                    feature_dump_path_.c_str());
+      } else {
+        RCLCPP_ERROR(get_logger(), "cannot open feature dump %s",
+                     feature_dump_path_.c_str());
+      }
+    }
 
     auto qos = rclcpp::SensorDataQoS().keep_last(1);
     sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
@@ -335,8 +370,44 @@ private:
       Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> solver(covariance);
       // Eigenvalues come out ascending, so the last vector is the long axis.
       shape.verticality = std::abs(solver.eigenvectors().col(2).z());
+
+      const float lam1 = solver.eigenvalues()[2]; // largest (height axis)
+      const float lam2 = solver.eigenvalues()[1];
+      const float lam3 = solver.eigenvalues()[0]; // smallest
+      if (lam1 > 0.0f) {
+        shape.eig_width_ratio = lam2 / lam1;
+      }
+      if (lam2 > 0.0f) {
+        shape.eig_depth_ratio = lam3 / lam2;
+      }
     } else {
       shape.verticality = 1.0f; // too sparse to judge orientation
+    }
+
+    // Vertical slice profile: how the points spread over the height band.
+    if (shape.height > 0.0f && n_slices_ > 0) {
+      std::vector<int> counts(static_cast<std::size_t>(n_slices_), 0);
+      const float inv = static_cast<float>(n_slices_) / shape.height;
+      for (const int idx : indices.indices) {
+        const auto &pt = cloud[idx];
+        int bin = static_cast<int>((pt.z - min_z) * inv);
+        bin = std::max(0, std::min(n_slices_ - 1, bin));
+        ++counts[static_cast<std::size_t>(bin)];
+      }
+      int occupied = 0;
+      int peak = 0;
+      for (const int c : counts) {
+        if (c >= slice_min_points_) {
+          ++occupied;
+        }
+        peak = std::max(peak, c);
+      }
+      shape.slice_occupancy =
+          static_cast<float>(occupied) / static_cast<float>(n_slices_);
+      if (shape.points > 0) {
+        shape.slice_peak =
+            static_cast<float>(peak) / static_cast<float>(shape.points);
+      }
     }
 
     return shape;
@@ -356,10 +427,45 @@ private:
     if (shape.width < min_width_m_ || shape.width > max_width_m_) {
       return false;
     }
-    if (shape.height / std::max(shape.width, 0.05f) < min_aspect_ratio_) {
+    const double aspect =
+        static_cast<double>(shape.height) /
+        std::max(static_cast<double>(shape.width), 0.05);
+    if (aspect < min_aspect_ratio_) {
+      return false;
+    }
+    if (max_aspect_ratio_ > 0.0 && aspect > max_aspect_ratio_) {
+      return false;
+    }
+    if (max_eig_width_ratio_ > 0.0 &&
+        shape.eig_width_ratio > max_eig_width_ratio_) {
+      return false;
+    }
+    if (min_eig_depth_ratio_ > 0.0 &&
+        shape.eig_depth_ratio < min_eig_depth_ratio_) {
+      return false;
+    }
+    if (min_slice_occupancy_ > 0.0 &&
+        shape.slice_occupancy < min_slice_occupancy_) {
       return false;
     }
     return shape.verticality >= min_verticality_;
+  }
+
+  /// Append one labelled feature row to the CSV (for offline tuning / Phase 2
+  /// labelling). `human` is the outcome of the current gate, so the dump stays
+  /// useful even before a real label set exists.
+  void dump_feature(const ClusterShape &shape, bool human) {
+    if (!dump_.is_open()) {
+      return;
+    }
+    dump_ << frame_index_ << ',' << (human ? 1 : 0) << ',' << shape.cx << ','
+          << shape.cy << ',' << shape.cz << ',' << shape.points << ','
+          << shape.range << ',' << shape.height << ',' << shape.width << ','
+          << (static_cast<double>(shape.height) /
+              std::max(static_cast<double>(shape.width), 0.05))
+          << ',' << shape.verticality << ',' << shape.eig_width_ratio << ','
+          << shape.eig_depth_ratio << ',' << shape.slice_occupancy << ','
+          << shape.slice_peak << '\n';
   }
 
   /// Match shaped blobs to persistent candidates and report the ones that
@@ -523,7 +629,9 @@ private:
 
       for (const auto &cluster : cluster_indices) {
         const ClusterShape shape = measure(*candidates, cluster);
-        if (looks_human(shape)) {
+        const bool human = looks_human(shape);
+        dump_feature(shape, human);
+        if (human) {
           shapes.push_back(shape);
         } else {
           const double r = std::max(1.0, static_cast<double>(shape.range));
@@ -532,9 +640,11 @@ private:
                        static_cast<int>(std::lround(points_at_one_meter_ / r)));
           RCLCPP_INFO_THROTTLE(
               get_logger(), *get_clock(), 2000,
-              "reject pts=%zu need=%d r=%.1f h=%.2f w=%.2f vert=%.2f",
+              "reject pts=%zu need=%d r=%.1f h=%.2f w=%.2f vert=%.2f "
+              "eigW=%.3f eigD=%.3f occ=%.2f peak=%.2f",
               shape.points, needed, shape.range, shape.height, shape.width,
-              shape.verticality);
+              shape.verticality, shape.eig_width_ratio, shape.eig_depth_ratio,
+              shape.slice_occupancy, shape.slice_peak);
         }
       }
     }
@@ -595,6 +705,13 @@ private:
   int verticality_min_points_;
   double points_at_one_meter_;
   int min_points_floor_;
+  double max_aspect_ratio_;
+  double max_eig_width_ratio_;
+  double min_eig_depth_ratio_;
+  int n_slices_;
+  int slice_min_points_;
+  double min_slice_occupancy_;
+  std::string feature_dump_path_;
   double assoc_radius_;
   int history_frames_;
   double move_distance_m_;
@@ -615,6 +732,7 @@ private:
 
   std::unordered_map<VoxelKey, double, VoxelKeyHash> background_;
   std::vector<Candidate> candidates_;
+  std::ofstream dump_;
 
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr pub_;
