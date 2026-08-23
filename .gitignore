@@ -234,5 +234,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# log folders
+# colcon (ROS 2) build artifacts
+build/
+install/
 log/
