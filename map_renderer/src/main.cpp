@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <deque>
 #include <string>
 #include <sys/stat.h>
@@ -537,7 +538,13 @@ void drawPersonLabel(const Camera2D &camera, Font font, Vector2 position,
 } // namespace
 
 int main() {
-  SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
+  unsigned int window_flags = FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT;
+  // Cover the leftover HDMI frame: stay above other windows and skip chrome.
+  if (envFlagEnabled("TAKEMURA_RENDERER_FULLSCREEN")) {
+    window_flags |= FLAG_WINDOW_TOPMOST | FLAG_WINDOW_UNDECORATED |
+                    FLAG_WINDOW_ALWAYS_RUN;
+  }
+  SetConfigFlags(window_flags);
   InitWindow(kInitialWidth, kInitialHeight,
              "Takemura Holographic Renderer - Trail Demo");
   if (!IsWindowReady()) {
@@ -546,6 +553,10 @@ int main() {
     return 1;
   }
   fillMonitorIfRequested();
+  if (envFlagEnabled("TAKEMURA_RENDERER_FULLSCREEN")) {
+    SetWindowState(FLAG_WINDOW_TOPMOST);
+    SetWindowFocused();
+  }
   SetTargetFPS(30);
   g_trail_lifetime =
       std::max(1.0F, envFloat("TAKEMURA_TRAIL_SECONDS", g_trail_lifetime));
@@ -635,7 +646,14 @@ int main() {
   // Trails of people the tracker has dropped, still fading out.
   std::vector<std::deque<TrailPoint>> fading_trails;
 
-  while (!WindowShouldClose()) {
+  const bool kiosk = envFlagEnabled("TAKEMURA_RENDERER_FULLSCREEN");
+  // Still call WindowShouldClose() so raylib drains events. In kiosk/fan
+  // mode ignore ESC and the window chrome so the exhibit does not quit.
+  while (true) {
+    const bool want_close = WindowShouldClose();
+    if (want_close && !kiosk) {
+      break;
+    }
     if (IsKeyPressed(KEY_SPACE)) {
       paused = !paused;
     }

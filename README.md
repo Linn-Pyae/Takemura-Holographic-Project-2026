@@ -305,7 +305,7 @@ graph LR
 Pan / zoom / rotation are four numbers in `/tmp/takemura-view` (`pan_x pan_y zoom rotation`). The launcher restores the last saved view from `~/.config/takemura-view`.
 
 ```bash
-echo "130 -50 0.8 180" > /tmp/takemura-view
+echo "0 0 0.8 180" > /tmp/takemura-view
 ```
 
 Footprint lifetime is `TAKEMURA_TRAIL_SECONDS` in `project_ws/scripts/run_bag_map.sh` (currently 2). After changing it:

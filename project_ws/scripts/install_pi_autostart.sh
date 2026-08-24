@@ -53,11 +53,29 @@ for _ in \$(seq 1 60); do
   sleep 1
 done
 
+# Wipe the previous HDMI frame so the fan does not keep an old image.
+xsetroot -solid black 2>/dev/null || true
+# No keyboard on the exhibit: default X blanks HDMI after 10 min and the
+# fan then holds the last frame, which looks like a freeze.
+xset s off 2>/dev/null || true
+xset s noblank 2>/dev/null || true
+xset -dpms 2>/dev/null || true
+
 cd "$WS"
 exec ./scripts/run_bag_map.sh pi
 EOF
 chmod 755 "$WRAPPER"
 chown "$MAP_USER":"$MAP_USER" "$WRAPPER"
+
+install -d /etc/X11/xorg.conf.d
+cat > /etc/X11/xorg.conf.d/10-takemura-noblank.conf << 'EOF'
+Section "ServerFlags"
+    Option "BlankTime" "0"
+    Option "StandbyTime" "0"
+    Option "SuspendTime" "0"
+    Option "OffTime" "0"
+EndSection
+EOF
 
 cat > /etc/systemd/system/takemura-x.service << 'EOF'
 [Unit]
@@ -66,7 +84,8 @@ After=systemd-user-sessions.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/Xorg :0 vt7 -nolisten tcp -ac
+# -s 0 -dpms: never blank HDMI (the fan otherwise freezes on the last frame).
+ExecStart=/usr/bin/Xorg :0 vt7 -nolisten tcp -ac -s 0 -dpms
 Restart=always
 RestartSec=2
 

@@ -201,6 +201,10 @@ setup_pi_env() {
       xrandr --output HDMI-1 --mode 1280x720 --primary 2>/dev/null || true
     xrandr --output HDMI-2 --off 2>/dev/null || true
   fi
+  # xrandr can re-enable DPMS. Keep HDMI awake or the fan freezes on the last frame.
+  xset s off 2>/dev/null || true
+  xset s noblank 2>/dev/null || true
+  xset -dpms 2>/dev/null || true
 }
 
 # A hand-typed run belongs to the SSH session, so closing the terminal kills
@@ -385,6 +389,41 @@ echo "Pipeline running. Watch the map window for LIVE IPC status."
 echo "Close the map window or press Ctrl+C to stop."
 echo
 
+# GLFW/xrandr can turn screensaver back on when the window opens.
+xset s off 2>/dev/null || true
+xset s noblank 2>/dev/null || true
+xset -dpms 2>/dev/null || true
+
+# Keep going until the renderer dies (systemd then restarts the whole unit).
+# If a ROS node exits, start it again so the fan is not left on a frozen frame.
+typeset -i watchdog=0
 while kill -0 "$RENDERER_PID" 2>/dev/null; do
-  sleep 0.5
+  if ! pgrep -f 'person_cluster_node' >/dev/null 2>&1; then
+    echo "person_cluster_node exited; restarting"
+    if [[ -n "$BAG" ]]; then
+      ros2 run person_cluster person_cluster_node --ros-args "${CLUSTER_ROS_ARGS[@]}" &
+    else
+      ros2 run person_cluster person_cluster_node --ros-args \
+        -r "${CLUSTER_TOPIC}:=${LIVE_LIDAR_TOPIC}" \
+        "${CLUSTER_ROS_ARGS[@]}" &
+    fi
+    PIDS+=($!)
+  fi
+  if ! pgrep -f 'person_tracker.track_node|person_tracker/track_node' >/dev/null 2>&1; then
+    echo "track_node exited; restarting"
+    ros2 run person_tracker track_node &
+    PIDS+=($!)
+  fi
+  if ! pgrep -f 'renderer_bridge_node' >/dev/null 2>&1; then
+    echo "renderer_bridge_node exited; restarting"
+    ros2 run renderer_bridge renderer_bridge_node &
+    PIDS+=($!)
+  fi
+  watchdog+=1
+  if (( watchdog == 1 || watchdog % 30 == 0 )); then
+    xset s off 2>/dev/null || true
+    xset s noblank 2>/dev/null || true
+    xset -dpms 2>/dev/null || true
+  fi
+  sleep 1
 done
