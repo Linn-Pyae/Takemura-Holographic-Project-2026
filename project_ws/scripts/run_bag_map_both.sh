@@ -75,6 +75,13 @@ setup_mac_env() {
   export MAMBA_ROOT_PREFIX="${MAMBA_ROOT_PREFIX:-$HOME/micromamba}"
   eval "$("$MAMBA_ROOT_PREFIX/bin/micromamba" shell hook -s zsh)"
   micromamba activate ros_view
+  # Open3D's bundled GLFW grabs the Wayland backend when WAYLAND_DISPLAY is set,
+  # which then fails GLEW init ("Failed to initialize GLEW"). Force the X11
+  # backend so the 3D cloud window opens (mirrors map_renderer/raylib on :0).
+  unset WAYLAND_DISPLAY
+  export XDG_SESSION_TYPE=x11
+  export GDK_BACKEND=x11
+  export DISPLAY="${DISPLAY:-:0}"
   cd "$WS"
   if [[ ! -f install/setup.zsh ]]; then
     echo "error: workspace not built. Run:" >&2
