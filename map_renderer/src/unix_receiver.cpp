@@ -11,6 +11,7 @@
 #include <array>
 #include <cstddef>
 #include <utility>
+#include <vector>
 
 namespace mapipc {
 namespace {
@@ -218,6 +219,36 @@ ReceiveResult UnixDatagramReceiver::receive() {
 
     result.status = ReceiveStatus::packet;
     return result;
+}
+
+ReceiveStatus UnixDatagramReceiver::receiveRaw(std::vector<std::uint8_t> *bytes,
+                                               std::string *error,
+                                               std::size_t max_bytes) {
+    if (bytes == nullptr) {
+        setError(error, "receiveRaw output buffer is null");
+        return ReceiveStatus::socket_error;
+    }
+    bytes->clear();
+    if (!isOpen()) {
+        setError(error, "Unix datagram receiver is not open");
+        return ReceiveStatus::socket_error;
+    }
+    if (max_bytes < 28) {
+        max_bytes = 28;
+    }
+
+    std::vector<std::uint8_t> buffer(max_bytes);
+    const ssize_t received = ::recv(socket_fd_, buffer.data(), buffer.size(), 0);
+    if (received < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return ReceiveStatus::would_block;
+        }
+        setError(error, systemError("recv"));
+        return ReceiveStatus::socket_error;
+    }
+    buffer.resize(static_cast<std::size_t>(received));
+    *bytes = std::move(buffer);
+    return ReceiveStatus::packet;
 }
 
 }  // namespace mapipc

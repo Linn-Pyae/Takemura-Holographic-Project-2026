@@ -31,6 +31,7 @@ else
   ROS_UNDERLAY="${ROS_UNDERLAY:-/opt/ros/jazzy/setup.bash}"
 fi
 TAKEMURA_RENDERER_SOCKET="${TAKEMURA_RENDERER_SOCKET:-/tmp/takemura-renderer.sock}"
+TAKEMURA_STATIC_MAP_SOCKET="${TAKEMURA_STATIC_MAP_SOCKET:-/tmp/takemura-static-map.sock}"
 TAKEMURA_VIEW_FILE="${TAKEMURA_VIEW_FILE:-/tmp/takemura-view}"
 TAKEMURA_VIEW_SAVED="${TAKEMURA_VIEW_SAVED:-$HOME/.config/takemura-view}"
 # pan_x pan_y zoom rotation, as tuned on the holographic fan.
@@ -256,6 +257,7 @@ if [[ -z "$BAG" ]]; then
   export TRACK_DT="${TRACK_DT:-0.12}"
 fi
 export TAKEMURA_RENDERER_SOCKET
+export TAKEMURA_STATIC_MAP_SOCKET
 
 ros2 daemon stop >/dev/null 2>&1 || true
 
@@ -266,9 +268,15 @@ kill_pipeline_procs() {
   pkill -9 -f 'person_tracker.track_node' 2>/dev/null || true
   pkill -9 -f 'person_tracker/track_node' 2>/dev/null || true
   pkill -9 -f 'renderer_bridge_node' 2>/dev/null || true
+  pkill -9 -f 'static_map_projector_node' 2>/dev/null || true
+  pkill -9 -f 'static_map_line_extractor_node' 2>/dev/null || true
+  pkill -9 -f 'static_map_bridge_node' 2>/dev/null || true
   pkill -9 -f 'ros2 run person_cluster' 2>/dev/null || true
   pkill -9 -f 'ros2 run person_tracker' 2>/dev/null || true
   pkill -9 -f 'ros2 run renderer_bridge' 2>/dev/null || true
+  pkill -9 -f 'ros2 run static_map_projector' 2>/dev/null || true
+  pkill -9 -f 'ros2 run static_map_line_extractor' 2>/dev/null || true
+  pkill -9 -f 'ros2 run static_map_bridge' 2>/dev/null || true
   pkill -9 -f "$RENDERER_BIN" 2>/dev/null || true
   sleep 0.4
 }
@@ -305,6 +313,7 @@ else
   echo "cloud=$LIVE_LIDAR_TOPIC -> $CLUSTER_TOPIC (remap)"
 fi
 echo "flow: cloud -> cluster -> tracker -> bridge -> map_renderer"
+echo "      cloud -> static_map_projector -> line_extractor -> static_map_bridge"
 echo "GUI: raylib footprint map (close window or Ctrl+C to stop)"
 echo "Wait ~7 s for cluster floor/warmup before footprints appear."
 echo
@@ -312,6 +321,7 @@ echo
 # Renderer must bind the Unix socket BEFORE the bridge starts sending.
 echo "Opening holographic footprint map (binds $TAKEMURA_RENDERER_SOCKET)…"
 export TAKEMURA_RENDERER_SOCKET
+export TAKEMURA_STATIC_MAP_SOCKET
 unset TAKEMURA_RENDERER_DEMO
 # /tmp is wiped on reboot, so a tuned view is kept in $TAKEMURA_VIEW_SAVED and
 # copied back on every start.
@@ -383,6 +393,26 @@ sleep 0.5
 
 ros2 run renderer_bridge renderer_bridge_node &
 PIDS+=($!)
+sleep 0.3
+
+# Walls / furniture: occupancy grid -> coarse lines -> Unix socket.
+if [[ -n "$BAG" ]]; then
+  ros2 run static_map_projector static_map_projector_node &
+else
+  ros2 run static_map_projector static_map_projector_node --ros-args \
+    -r '/velodyne_points_bag:=/velodyne_points' \
+    -p 'max_range:=12.0' \
+    -p 'map_update_period:=0.20' \
+    -p 'static_observation_threshold:=5' &
+fi
+PIDS+=($!)
+sleep 0.3
+ros2 run static_map_line_extractor static_map_line_extractor_node &
+PIDS+=($!)
+sleep 0.3
+ros2 run static_map_bridge static_map_bridge_node --ros-args \
+  -p "socket_path:=${TAKEMURA_STATIC_MAP_SOCKET}" &
+PIDS+=($!)
 
 echo
 echo "Pipeline running. Watch the map window for LIVE IPC status."
@@ -417,6 +447,30 @@ while kill -0 "$RENDERER_PID" 2>/dev/null; do
   if ! pgrep -f 'renderer_bridge_node' >/dev/null 2>&1; then
     echo "renderer_bridge_node exited; restarting"
     ros2 run renderer_bridge renderer_bridge_node &
+    PIDS+=($!)
+  fi
+  if ! pgrep -f 'static_map_projector_node' >/dev/null 2>&1; then
+    echo "static_map_projector_node exited; restarting"
+    if [[ -n "$BAG" ]]; then
+      ros2 run static_map_projector static_map_projector_node &
+    else
+      ros2 run static_map_projector static_map_projector_node --ros-args \
+        -r '/velodyne_points_bag:=/velodyne_points' \
+        -p 'max_range:=12.0' \
+        -p 'map_update_period:=0.20' \
+        -p 'static_observation_threshold:=5' &
+    fi
+    PIDS+=($!)
+  fi
+  if ! pgrep -f 'static_map_line_extractor_node' >/dev/null 2>&1; then
+    echo "static_map_line_extractor_node exited; restarting"
+    ros2 run static_map_line_extractor static_map_line_extractor_node &
+    PIDS+=($!)
+  fi
+  if ! pgrep -f 'static_map_bridge_node' >/dev/null 2>&1; then
+    echo "static_map_bridge_node exited; restarting"
+    ros2 run static_map_bridge static_map_bridge_node --ros-args \
+      -p "socket_path:=${TAKEMURA_STATIC_MAP_SOCKET}" &
     PIDS+=($!)
   fi
   watchdog+=1
