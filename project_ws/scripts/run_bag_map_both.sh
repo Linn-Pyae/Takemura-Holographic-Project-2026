@@ -13,6 +13,9 @@
 #
 # Live cloud topic default: /velodyne_points
 # Override with: LIVE_LIDAR_TOPIC=/your/topic ./scripts/run_bag_map_both.sh
+# Try the optional shape gates with:
+# PERSON_CLUSTER_EXTRA_PARAMS_FILE=config/person_cluster.shape_gate.yaml \
+#   ./scripts/run_bag_map_both.sh mac lidar_sample
 #
 # Close either GUI window or Ctrl+C to stop everything.
 set -eo pipefail
@@ -288,17 +291,33 @@ if ! kill -0 "$RENDERER_PID" 2>/dev/null; then
   exit 1
 fi
 
+# Keep person detection identical to run_bag_map.sh. The extra profile is
+# optional and is applied last, so it can safely override only trial values.
+CLUSTER_ROS_ARGS=(--params-file "$WS/config/person_cluster.yaml")
+if [[ -z "$BAG" ]]; then
+  CLUSTER_ROS_ARGS+=(--params-file "$WS/config/person_cluster.live.yaml")
+fi
+if [[ -n "${PERSON_CLUSTER_EXTRA_PARAMS_FILE:-}" ]]; then
+  CLUSTER_EXTRA_PARAMS_FILE="$PERSON_CLUSTER_EXTRA_PARAMS_FILE"
+  if [[ "$CLUSTER_EXTRA_PARAMS_FILE" != /* ]]; then
+    CLUSTER_EXTRA_PARAMS_FILE="$WS/$CLUSTER_EXTRA_PARAMS_FILE"
+  fi
+  if [[ ! -f "$CLUSTER_EXTRA_PARAMS_FILE" ]]; then
+    echo "error: person-cluster parameter file not found: $CLUSTER_EXTRA_PARAMS_FILE" >&2
+    exit 1
+  fi
+  CLUSTER_ROS_ARGS+=(--params-file "$CLUSTER_EXTRA_PARAMS_FILE")
+fi
+
 if [[ -n "$BAG" ]]; then
   ros2 bag play "$BAG" --loop --remap "${BAG_SRC_TOPIC}:=${CLUSTER_TOPIC}" &
   PIDS+=($!)
   sleep 1
-  ros2 run person_cluster person_cluster_node &
+  ros2 run person_cluster person_cluster_node --ros-args "${CLUSTER_ROS_ARGS[@]}" &
 else
   ros2 run person_cluster person_cluster_node --ros-args \
     -r "${CLUSTER_TOPIC}:=${LIVE_LIDAR_TOPIC}" \
-    -p process_period:=0.10 \
-    -p min_cluster_size:=3 \
-    -p points_at_one_meter:=25.0 &
+    "${CLUSTER_ROS_ARGS[@]}" &
 fi
 PIDS+=($!)
 sleep 0.5

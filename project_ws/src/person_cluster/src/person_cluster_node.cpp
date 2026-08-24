@@ -436,11 +436,16 @@ private:
     if (max_aspect_ratio_ > 0.0 && aspect > max_aspect_ratio_) {
       return false;
     }
-    if (max_eig_width_ratio_ > 0.0 &&
+    // PCA ratios are not meaningful for sparse clusters. Their default
+    // placeholder values are 1.0, so applying an opt-in PCA gate before this
+    // check would incorrectly reject otherwise valid far-away detections.
+    const bool has_reliable_pca =
+        shape.points >= static_cast<std::size_t>(verticality_min_points_);
+    if (has_reliable_pca && max_eig_width_ratio_ > 0.0 &&
         shape.eig_width_ratio > max_eig_width_ratio_) {
       return false;
     }
-    if (min_eig_depth_ratio_ > 0.0 &&
+    if (has_reliable_pca && min_eig_depth_ratio_ > 0.0 &&
         shape.eig_depth_ratio < min_eig_depth_ratio_) {
       return false;
     }

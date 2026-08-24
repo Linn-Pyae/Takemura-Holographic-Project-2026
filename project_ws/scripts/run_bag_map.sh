@@ -344,32 +344,31 @@ if ! kill -0 "$RENDERER_PID" 2>/dev/null; then
   exit 1
 fi
 
-# Shared shape gate. Recorded clouds are already thinned, so the bag keeps the
-# defaults for everything else.
-CLUSTER_ROS_ARGS=(
-  -p 'process_period:=0.10'
-  -p 'min_cluster_size:=3'
-  -p 'points_at_one_meter:=15.0'
-  -p 'min_height_m:=0.35'
-  -p 'min_aspect_ratio:=0.55'
-  -p 'min_verticality:=0.25'
-  -p 'require_motion:=false'
-  -p 'static_threshold:=0.55'
-  -p 'warmup_frames:=8'
-  -p 'move_distance_m:=0.18'
-)
+# Detection tuning lives in config rather than in this launcher. The live
+# profile is applied after the shared profile, so its duplicate keys override.
+CLUSTER_ROS_ARGS=(--params-file "$WS/config/person_cluster.yaml")
 
 if [[ -z "$BAG" ]]; then
   # The live sensor sends ~21k points per scan from a high mount, so the
   # background has to fade slowly or someone standing still is erased, and
   # range/leaf are trimmed to keep the Pi at real time.
-  CLUSTER_ROS_ARGS+=(
-    -p 'max_range:=12.0'
-    -p 'leaf_size:=0.08'
-    -p 'bg_alpha:=0.01'
-    -p 'static_threshold:=0.60'
-    -p 'warmup_frames:=15'
-  )
+  CLUSTER_ROS_ARGS+=(--params-file "$WS/config/person_cluster.live.yaml")
+fi
+
+# Optional last-applied profile for reversible detection experiments. A
+# relative path is resolved from project_ws, e.g.
+# PERSON_CLUSTER_EXTRA_PARAMS_FILE=config/person_cluster.shape_gate.yaml \
+#   ./scripts/run_bag_map.sh mac lidar_sample
+if [[ -n "${PERSON_CLUSTER_EXTRA_PARAMS_FILE:-}" ]]; then
+  CLUSTER_EXTRA_PARAMS_FILE="$PERSON_CLUSTER_EXTRA_PARAMS_FILE"
+  if [[ "$CLUSTER_EXTRA_PARAMS_FILE" != /* ]]; then
+    CLUSTER_EXTRA_PARAMS_FILE="$WS/$CLUSTER_EXTRA_PARAMS_FILE"
+  fi
+  if [[ ! -f "$CLUSTER_EXTRA_PARAMS_FILE" ]]; then
+    echo "error: person-cluster parameter file not found: $CLUSTER_EXTRA_PARAMS_FILE" >&2
+    exit 1
+  fi
+  CLUSTER_ROS_ARGS+=(--params-file "$CLUSTER_EXTRA_PARAMS_FILE")
 fi
 
 if [[ -n "$BAG" ]]; then

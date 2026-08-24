@@ -1,0 +1,10 @@
+# Trial profile: enable the optional XYZ-only shape gates. Apply this after
+# person_cluster.yaml (and, for a live sensor, person_cluster.live.yaml).
+# These deliberately conservative starting values need tuning against bags and
+# the exhibit scene; they are not loaded by default.
+person_cluster_node:
+  ros__parameters:
+    max_aspect_ratio: 7.0
+    max_eig_width_ratio: 0.55
+    min_eig_depth_ratio: 0.08
+    min_slice_occupancy: 0.20

@@ -80,6 +80,10 @@ This is a prediction-free motion filter; no Kalman filter and no Hungarian assig
 | `verticality_min_points`                | `12`            | Minimum points needed to trust the verticality estimate                             |
 | `points_at_one_meter`                   | `45.0`          | Expected point density at 1 m range; scales the minimum point count with distance   |
 | `min_points_floor`                      | `5`             | Absolute floor on required point count regardless of distance                       |
+| `max_aspect_ratio`                      | `0.0`           | Reject height/width above this value; `0` disables the upper bound                  |
+| `max_eig_width_ratio`                   | `0.0`           | Reject clusters too broad relative to their PCA height axis; `0` disables it        |
+| `min_eig_depth_ratio`                   | `0.0`           | Reject near-planar PCA shapes; `0` disables it                                      |
+| `min_slice_occupancy`                   | `0.0`           | Require points in this fraction of height slices; `0` disables it                   |
 | `assoc_radius`                          | `0.70`          | Max distance to match a new detection to an existing candidate (m)                  |
 | `history_frames`                        | `10`            | Length of position history kept per candidate                                       |
 | `move_distance_m`                       | `0.35`          | Minimum displacement within the history window to count as movement (m)             |
@@ -94,4 +98,3 @@ This is a prediction-free motion filter; no Kalman filter and no Hungarian assig
 
 - Floor estimation and background warmup must both finish before detections are published; until then the node publishes empty `PoseArray` messages each frame.
 - Setting `require_motion` to `false` skips the candidate motion gate and publishes raw human-shaped cluster centroids every frame; useful for debugging the shape gate alone.
-
