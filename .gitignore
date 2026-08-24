@@ -9,8 +9,6 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
-# .NET build artifacts
-obj/
 develop-eggs/
 dist/
 downloads/
@@ -201,24 +199,9 @@ cython_debug/
 #   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
 #   and can be added to the global gitignore or merged into this file. However, if you prefer, 
 #   you could uncomment the following to ignore the entire vscode folder
-.vscode/
+# .vscode/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
-
-# Local temporary and tracking evaluation outputs
-*.tmp
-*.temp
-*~
-benchmark_results.json
-long_run.json
-proximity_noise_sweep.csv
-proximity_noise_sweep_table.txt
-proximity_noise_multiseed_trials.csv
-proximity_noise_multiseed_summary.csv
-proximity_noise_failure_rate_table.txt
-proximity_noise_failure_rate_heatmap.png
-benchmark_visualization.png
-tracking.gif
 
 # Ruff stuff:
 .ruff_cache/
@@ -233,6 +216,3 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-
-# log folders
-log/

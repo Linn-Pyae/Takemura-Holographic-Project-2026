@@ -1,0 +1,30 @@
+{
+  "bag_file": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\lidar_sample\\lidar_sample_0.mcap",
+  "topic": "/velodyne_points_wifi",
+  "message_type": "sensor_msgs/msg/PointCloud2",
+  "frame_id": "velodyne",
+  "messages_decoded": 155,
+  "frames_used": 102,
+  "mapping_frames_after_floor_warmup": 88,
+  "total_points_decoded": 620000,
+  "total_points_in_used_frames": 408000,
+  "invalid_points_in_used_frames": 0,
+  "estimated_floor_z": -1.125,
+  "filtered_points": 177757,
+  "static_cells": 364,
+  "parameters": {
+    "auto_floor": true,
+    "floor_z_fallback": -0.85,
+    "min_height_above_floor": 0.3,
+    "max_height_above_floor": 2.0,
+    "max_range": 15.0,
+    "voxel_size_xy": 0.1,
+    "static_observation_threshold": 5,
+    "map_update_period": 0.2
+  },
+  "images": {
+    "raw_xy_projection": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_projector\\offline\\output\\raw_xy_projection.png",
+    "static_occupancy_map": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_projector\\offline\\output\\static_occupancy_map.png",
+    "static_map_comparison": "C:\\Users\\sakus\\Documents\\Codex\\2026-08-10\\new-chat-2\\Takemura-Holographic-Project-2026\\project_ws\\src\\static_map_projector\\offline\\output\\static_map_comparison.png"
+  }
+}
