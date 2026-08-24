@@ -1,7 +1,0 @@
-app/
-
-# Reproducible local build output
-metastudio-cli/build/
-metastudio-cli/dist/
-holo-canvas/bin/
-holo-canvas/obj/
