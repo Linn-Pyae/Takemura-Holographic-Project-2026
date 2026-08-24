@@ -1,0 +1,14 @@
+# Person detection tuning shared by the footprint-map launcher.
+# These values apply to both recorded bags and the live Velodyne feed.
+person_cluster_node:
+  ros__parameters:
+    process_period: 0.10
+    min_cluster_size: 3
+    points_at_one_meter: 15.0
+    min_height_m: 0.35
+    min_aspect_ratio: 0.55
+    min_verticality: 0.25
+    require_motion: false
+    static_threshold: 0.55
+    warmup_frames: 8
+    move_distance_m: 0.18

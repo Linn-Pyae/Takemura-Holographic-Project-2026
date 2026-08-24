@@ -70,6 +70,26 @@ colcon build --packages-select person_cluster person_tracker
 source install/setup.zsh
 ```
 
+## Person-detection tuning
+
+The footprint-map launcher reads its human-detection parameters from
+`config/person_cluster.yaml`. For the live sensor it also applies
+`config/person_cluster.live.yaml`; values in that second file override the
+shared profile. Edit these YAML files to tune detection rather than adding
+`-p` options to `scripts/run_bag_map.sh`.
+
+`config/person_cluster.shape_gate.yaml` is an opt-in trial profile for the
+extra PCA and vertical-slice gates. It is not used in normal runs. Test it with
+the same bag or live feed by appending it after the normal profile:
+
+```bash
+PERSON_CLUSTER_EXTRA_PARAMS_FILE=config/person_cluster.shape_gate.yaml \
+  ./scripts/run_bag_map.sh mac lidar_sample
+```
+
+To view the raw point cloud in Open3D alongside the footprint map while using
+the same profile, replace `run_bag_map.sh` with `run_bag_map_both.sh`.
+
 ## Run (recommended)
 
 ### Footprint map (Mac dev or Pi HDMI)
