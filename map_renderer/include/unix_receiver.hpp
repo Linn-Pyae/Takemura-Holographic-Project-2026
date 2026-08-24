@@ -2,8 +2,11 @@
 
 #include "person_packet.hpp"
 
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace mapipc {
 
@@ -41,6 +44,11 @@ public:
     // Call repeatedly until would_block to consume everything currently
     // queued. The caller should retain only the greatest sequence per person.
     ReceiveResult receive();
+
+    // Drain one raw datagram (static-map packets are up to 8 KiB).
+    ReceiveStatus receiveRaw(std::vector<std::uint8_t> *bytes,
+                             std::string *error = nullptr,
+                             std::size_t max_bytes = 8192);
 
 private:
     std::string socket_path_;

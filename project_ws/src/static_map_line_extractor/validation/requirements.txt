@@ -1,0 +1,5 @@
+matplotlib==3.11.1
+mcap==1.4.0
+mcap-ros2-support==0.5.7
+numpy==2.5.2
+opencv-python-headless==5.0.0.93

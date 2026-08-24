@@ -42,7 +42,6 @@ cat > "$XML" << EOF
         <type>UDPv4</type>
         <interfaceWhiteList>
           <address>$MAC_IP</address>
-          <address>127.0.0.1</address>
         </interfaceWhiteList>
       </transport_descriptor>
     </transport_descriptors>
@@ -57,8 +56,6 @@ cat > "$XML" << EOF
             <locator><udpv4><address>$MAC_IP</address></udpv4></locator>
           </metatrafficUnicastLocatorList>
           <initialPeersList>
-            <locator><udpv4><address>$MAC_IP</address></udpv4></locator>
-            <locator><udpv4><address>127.0.0.1</address></udpv4></locator>
             <locator><udpv4><address>$PI_IP</address></udpv4></locator>
           </initialPeersList>
         </builtin>
@@ -75,7 +72,7 @@ export MAMBA_ROOT_PREFIX="$HOME/micromamba"
 eval "$("$HOME/micromamba/bin/micromamba" shell hook -s zsh)"
 micromamba activate ros_view
 
-export ROS_DOMAIN_ID=42
+export ROS_DOMAIN_ID=0
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 # Both names needed (ros2cli vs rclpy / Fast DDS versions)
 export FASTRTPS_DEFAULT_PROFILES_FILE="$XML"

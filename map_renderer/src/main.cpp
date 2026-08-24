@@ -9,7 +9,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <deque>
+#include <optional>
 #include <string>
 #include <sys/stat.h>
 #include <unordered_map>
@@ -171,6 +174,127 @@ std::string rendererSocketPath() {
     return value;
   }
   return "/tmp/takemura-renderer.sock";
+}
+
+std::string staticMapSocketPath() {
+  const char *value = std::getenv("TAKEMURA_STATIC_MAP_SOCKET");
+  if (value != nullptr && value[0] != '\0') {
+    return value;
+  }
+  return "/tmp/takemura-static-map.sock";
+}
+
+Vector2 lidarPlanarToMap(float x, float y);
+
+struct MapLine {
+  Vector2 start{};
+  Vector2 end{};
+};
+
+// Assembles TSMP packets (little-endian) from static_map_bridge. A map is
+// shown only after every packet in that sequence has arrived.
+struct StaticMapAssembler {
+  std::uint64_t assembling_sequence = 0;
+  std::uint32_t packet_count = 0;
+  std::uint64_t published_sequence = 0;
+  std::vector<std::optional<std::vector<MapLine>>> packets;
+  std::vector<MapLine> lines;
+
+  static std::uint16_t readU16(const std::uint8_t *data) {
+    return static_cast<std::uint16_t>(data[0]) |
+           static_cast<std::uint16_t>(data[1] << 8);
+  }
+  static std::uint32_t readU32(const std::uint8_t *data) {
+    std::uint32_t value = 0;
+    for (unsigned i = 0; i < 4; ++i) {
+      value |= static_cast<std::uint32_t>(data[i]) << (i * 8U);
+    }
+    return value;
+  }
+  static std::uint64_t readU64(const std::uint8_t *data) {
+    std::uint64_t value = 0;
+    for (unsigned i = 0; i < 8; ++i) {
+      value |= static_cast<std::uint64_t>(data[i]) << (i * 8U);
+    }
+    return value;
+  }
+  static float readF32(const std::uint8_t *data) {
+    const std::uint32_t bits = readU32(data);
+    float value = 0.0F;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+  }
+
+  void ingest(const std::vector<std::uint8_t> &bytes) {
+    if (bytes.size() < 28 || bytes[0] != 'T' || bytes[1] != 'S' ||
+        bytes[2] != 'M' || bytes[3] != 'P') {
+      return;
+    }
+    if (readU16(bytes.data() + 4) != 1 || readU16(bytes.data() + 6) != 28) {
+      return;
+    }
+    const std::uint64_t sequence = readU64(bytes.data() + 8);
+    const std::uint32_t index = readU32(bytes.data() + 16);
+    const std::uint32_t count = readU32(bytes.data() + 20);
+    const std::uint32_t segment_count = readU32(bytes.data() + 24);
+    if (count == 0 || index >= count) {
+      return;
+    }
+    if (bytes.size() != 28U + static_cast<std::size_t>(segment_count) * 16U) {
+      return;
+    }
+    if (sequence < published_sequence) {
+      return;
+    }
+    if (sequence != assembling_sequence) {
+      assembling_sequence = sequence;
+      packet_count = count;
+      packets.assign(count, std::nullopt);
+    } else if (count != packet_count) {
+      return;
+    }
+
+    std::vector<MapLine> chunk;
+    chunk.reserve(segment_count);
+    for (std::uint32_t i = 0; i < segment_count; ++i) {
+      const std::uint8_t *seg = bytes.data() + 28 + i * 16;
+      chunk.push_back({lidarPlanarToMap(readF32(seg), readF32(seg + 4)),
+                       lidarPlanarToMap(readF32(seg + 8), readF32(seg + 12))});
+    }
+    packets[index] = std::move(chunk);
+
+    for (const auto &packet : packets) {
+      if (!packet.has_value()) {
+        return;
+      }
+    }
+    lines.clear();
+    for (const auto &packet : packets) {
+      lines.insert(lines.end(), packet->begin(), packet->end());
+    }
+    published_sequence = sequence;
+  }
+};
+
+void drainStaticMap(mapipc::UnixDatagramReceiver &receiver,
+                    StaticMapAssembler &map) {
+  for (;;) {
+    std::vector<std::uint8_t> bytes;
+    const mapipc::ReceiveStatus status = receiver.receiveRaw(&bytes);
+    if (status == mapipc::ReceiveStatus::would_block) {
+      break;
+    }
+    if (status == mapipc::ReceiveStatus::packet) {
+      map.ingest(bytes);
+    }
+  }
+}
+
+void drawStaticMap(const std::vector<MapLine> &lines) {
+  constexpr Color ink{62, 92, 88, 230};
+  for (const MapLine &line : lines) {
+    DrawLineEx(line.start, line.end, 0.10F, ink);
+  }
 }
 
 // LiDAR planar (x forward, y left) onto the parchment:
@@ -537,7 +661,13 @@ void drawPersonLabel(const Camera2D &camera, Font font, Vector2 position,
 } // namespace
 
 int main() {
-  SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
+  unsigned int window_flags = FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT;
+  // Cover the leftover HDMI frame: stay above other windows and skip chrome.
+  if (envFlagEnabled("TAKEMURA_RENDERER_FULLSCREEN")) {
+    window_flags |= FLAG_WINDOW_TOPMOST | FLAG_WINDOW_UNDECORATED |
+                    FLAG_WINDOW_ALWAYS_RUN;
+  }
+  SetConfigFlags(window_flags);
   InitWindow(kInitialWidth, kInitialHeight,
              "Takemura Holographic Renderer - Trail Demo");
   if (!IsWindowReady()) {
@@ -546,6 +676,10 @@ int main() {
     return 1;
   }
   fillMonitorIfRequested();
+  if (envFlagEnabled("TAKEMURA_RENDERER_FULLSCREEN")) {
+    SetWindowState(FLAG_WINDOW_TOPMOST);
+    SetWindowFocused();
+  }
   SetTargetFPS(30);
   g_trail_lifetime =
       std::max(1.0F, envFloat("TAKEMURA_TRAIL_SECONDS", g_trail_lifetime));
@@ -624,6 +758,18 @@ int main() {
              receiver.socketPath().c_str());
   }
 
+  mapipc::UnixDatagramReceiver static_map_receiver(staticMapSocketPath());
+  std::string static_map_error;
+  StaticMapAssembler static_map;
+  const bool static_map_open = static_map_receiver.open(&static_map_error);
+  if (static_map_open) {
+    TraceLog(LOG_INFO, "Listening for static walls on %s",
+             static_map_receiver.socketPath().c_str());
+  } else {
+    TraceLog(LOG_WARNING, "Static map socket unavailable (%s)",
+             static_map_error.c_str());
+  }
+
   bool paused = false;
   float demo_time = 0.0F;
   std::array<DemoPerson, 2> demo_people{{
@@ -635,7 +781,14 @@ int main() {
   // Trails of people the tracker has dropped, still fading out.
   std::vector<std::deque<TrailPoint>> fading_trails;
 
-  while (!WindowShouldClose()) {
+  const bool kiosk = envFlagEnabled("TAKEMURA_RENDERER_FULLSCREEN");
+  // Still call WindowShouldClose() so raylib drains events. In kiosk/fan
+  // mode ignore ESC and the window chrome so the exhibit does not quit.
+  while (true) {
+    const bool want_close = WindowShouldClose();
+    if (want_close && !kiosk) {
+      break;
+    }
     if (IsKeyPressed(KEY_SPACE)) {
       paused = !paused;
     }
@@ -697,6 +850,9 @@ int main() {
     }
 
     const float dt = paused ? 0.0F : GetFrameTime();
+    if (static_map_open) {
+      drainStaticMap(static_map_receiver, static_map);
+    }
     if (ipc_mode) {
       drainLiveUpdates(receiver, live_people);
       updateLiveTrails(live_people, fading_trails, dt);
@@ -727,6 +883,7 @@ int main() {
     BeginMode2D(camera);
     drawMapBackground(!ipc_mode);
     drawLidarHeading();
+    drawStaticMap(static_map.lines);
     if (ipc_mode) {
       for (const auto &trail : fading_trails) {
         drawFootprints(trail, footprint_texture);
@@ -819,6 +976,9 @@ int main() {
 
   if (ipc_mode) {
     receiver.close();
+  }
+  if (static_map_open) {
+    static_map_receiver.close();
   }
 
   if (background_texture_loaded) {

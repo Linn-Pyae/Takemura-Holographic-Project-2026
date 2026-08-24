@@ -1,0 +1,10 @@
+bag,static_cells,preset,occupied_threshold,min_contour_area,maximum_line_gap,update_period,minimum_line_length,minimum_component_cells,contour_epsilon,wall_min_length,wall_min_aspect_ratio,minimum_block_size,wall_merge_angle_degrees,wall_merge_distance,wall_merge_gap,components,walls,blocks,line_segments,removed_small_components,mean_line_length,max_line_length
+lidar_sample_0.mcap,364,Detailed,100,0.0,0.2,0.2,0.3,5,0.1,1.0,3.0,0.35,8.0,0.2,0.3,11,8,3,20,24,2.9709395289421083,6.112104797363282
+lidar_sample_0.mcap,364,Balanced,100,0.0,0.2,0.2,0.3,8,0.1,1.2,3.5,0.4,12.0,0.3,0.5,10,6,4,22,25,3.5279193719228115,6.112104797363282
+lidar_sample_0.mcap,364,Minimal,100,0.0,0.2,0.2,0.5,12,0.2,1.5,4.0,0.5,15.0,0.35,0.7,10,4,5,24,25,5.004757005908156,6.112104797363282
+lidar_sample_2_0.mcap,584,Detailed,100,0.0,0.2,0.2,0.3,5,0.1,1.0,3.0,0.35,8.0,0.2,0.3,28,12,16,76,38,2.3563068548838295,5.238589477539066
+lidar_sample_2_0.mcap,584,Balanced,100,0.0,0.2,0.2,0.3,8,0.1,1.2,3.5,0.4,12.0,0.3,0.5,20,9,11,53,46,2.69961773554484,5.238589477539066
+lidar_sample_2_0.mcap,584,Minimal,100,0.0,0.2,0.2,0.5,12,0.2,1.5,4.0,0.5,15.0,0.35,0.7,13,7,6,31,53,2.8084592138017928,5.238589477539066
+lidar_sample_3_0.mcap,328,Detailed,100,0.0,0.2,0.2,0.3,5,0.1,1.0,3.0,0.35,8.0,0.2,0.3,10,5,5,25,8,3.0864826583862315,6.336908721923831
+lidar_sample_3_0.mcap,328,Balanced,100,0.0,0.2,0.2,0.3,8,0.1,1.2,3.5,0.4,12.0,0.3,0.5,9,5,4,21,9,3.0864826583862315,6.336908721923831
+lidar_sample_3_0.mcap,328,Minimal,100,0.0,0.2,0.2,0.5,12,0.2,1.5,4.0,0.5,15.0,0.35,0.7,9,4,5,24,9,3.5581033229827894,6.336908721923831

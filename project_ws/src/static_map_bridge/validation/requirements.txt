@@ -1,0 +1,5 @@
+mcap>=1.2,<2
+mcap-ros2-support>=0.5,<1
+numpy>=1.26,<3
+opencv-python-headless>=4.8,<5
+matplotlib>=3.8,<4
