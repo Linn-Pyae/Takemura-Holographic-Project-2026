@@ -236,3 +236,9 @@ __marimo__/
 
 # log folders
 log/
+
+# ide files
+.vscode/
+
+# Large local media (README uses demo.gif instead)
+demo_assets/*.mov

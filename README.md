@@ -2,7 +2,7 @@
 
 ### Real-time LiDAR human tracking rendered on a holographic fan display
 
-[Overview](#overview) • [Architecture](#architecture) • [Steps to Build](#steps-to-build) • [Usage](#usage) • [Implementation Details](#implementation-details) • [Results](#results) 
+[Overview](#overview) • [Demo](#demo) • [Architecture](#architecture) • [Steps to Build](#steps-to-build) • [Usage](#usage) • [Implementation Details](#implementation-details) • [Results](#results) 
 
 ---
 
@@ -15,6 +15,23 @@ This project detects people walking through a room using a 3D LiDAR, tracks thei
 ```
 VLP-16 LiDAR → velodyne ROS 2 driver → person_cluster → person_tracker → renderer_bridge → map_renderer → HDMI → holographic fan
 ```
+
+---
+
+
+
+## Demo
+
+Live exhibit recording (footprint trails on the holographic map) and sample LiDAR frames.
+
+![Exhibit demo](demo_assets/demo.gif)
+
+Raw VLP-16 clouds as seen in RViz (height-colored). Isolated blobs near the floor are the kind of returns `person_cluster` has to separate from walls and furniture.
+
+<p>
+<img src="demo_assets/lidar_1.png" alt="LiDAR point cloud, side view" width="48%">
+<img src="demo_assets/lidar_2.png" alt="LiDAR point cloud, another viewpoint" width="48%">
+</p>
 
 ---
 
@@ -355,10 +372,6 @@ Raylib parchment map that places distance-spaced, fading footprints from live Un
 #### 3.1 Pipeline Explanation
 
 [Map renderer](map_renderer/src/README.md)
-
-## Results
-
-Placeholder
 
 ---
 
