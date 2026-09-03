@@ -20,7 +20,7 @@ set -eo pipefail
 WS="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="$(cd "$WS/.." && pwd)"
 RENDERER_BIN="$REPO/map_renderer/build/renderer"
-VIEWER="$REPO/Test/view.py"
+VIEWER="$WS/scripts/view3d.py"
 BAG_SRC_TOPIC="/velodyne_points_wifi"
 CLUSTER_TOPIC="/velodyne_points_bag"
 LIVE_LIDAR_TOPIC="${LIVE_LIDAR_TOPIC:-/velodyne_points}"
@@ -226,8 +226,8 @@ kill_pipeline_procs() {
   pkill -9 -f 'ros2 run person_tracker' 2>/dev/null || true
   pkill -9 -f 'ros2 run renderer_bridge' 2>/dev/null || true
   pkill -9 -f "$RENDERER_BIN" 2>/dev/null || true
-  pkill -9 -f 'Test/view.py' 2>/dev/null || true
-  pkill -9 -f 'python -u view.py' 2>/dev/null || true
+  pkill -9 -f 'scripts/view3d.py' 2>/dev/null || true
+  pkill -9 -f 'python -u view3d.py' 2>/dev/null || true
   sleep 0.4
 }
 
@@ -305,10 +305,7 @@ PIDS+=($!)
 sleep 0.5
 
 echo "Opening Open3D (OpenGL) 3D viewer…"
-(
-  cd "$REPO/Test"
-  python -u view.py
-) &
+python -u "$VIEWER" &
 OPEN3D_PID=$!
 PIDS+=($OPEN3D_PID)
 

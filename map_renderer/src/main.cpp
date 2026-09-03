@@ -389,17 +389,8 @@ void resetLivePerson(LivePerson &person) {
 }
 
 constexpr Color kHeadingInk{88, 38, 32, 200};
-constexpr float kHeadingLength = 2.4F;
 
-void drawLidarHeading() {
-  // Forward = screen-up; LiDAR +Y (left) = screen-left after the mirror.
-  const Vector2 origin{0.0F, 0.0F};
-  const Vector2 forward = lidarPlanarToMap(kHeadingLength, 0.0F);
-  const Vector2 left = lidarPlanarToMap(0.0F, kHeadingLength);
-  DrawCircleV(origin, 0.08F, kHeadingInk);
-  DrawLineEx(origin, forward, 0.045F, kHeadingInk);
-  DrawLineEx(origin, left, 0.045F, Fade(kHeadingInk, 0.65F));
-}
+void drawLidarHeading() { DrawCircleV({0.0F, 0.0F}, 0.08F, kHeadingInk); }
 
 // Text is drawn in screen space after EndMode2D. Inside the camera a rotated
 // map would turn every label upside down or mirror it.
@@ -416,13 +407,6 @@ void drawScreenLabel(const Camera2D &camera, Font font, Vector2 world,
     position.y -= extent.y * 0.5F;
   }
   DrawTextEx(font, text, position, size, spacing, ink);
-}
-
-void drawLidarHeadingLabels(const Camera2D &camera, Font font) {
-  drawScreenLabel(camera, font, lidarPlanarToMap(kHeadingLength, 0.0F),
-                  "LIDAR FWD", 0.22F, {0.0F, -14.0F}, true, kHeadingInk);
-  drawScreenLabel(camera, font, lidarPlanarToMap(0.0F, kHeadingLength),
-                  "LIDAR LEFT", 0.22F, {0.0F, -14.0F}, true, kHeadingInk);
 }
 
 void drawMapBackground(bool draw_demo_route) {
@@ -541,8 +525,8 @@ int main() {
   unsigned int window_flags = FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT;
   // Cover the leftover HDMI frame: stay above other windows and skip chrome.
   if (envFlagEnabled("TAKEMURA_RENDERER_FULLSCREEN")) {
-    window_flags |= FLAG_WINDOW_TOPMOST | FLAG_WINDOW_UNDECORATED |
-                    FLAG_WINDOW_ALWAYS_RUN;
+    window_flags |=
+        FLAG_WINDOW_TOPMOST | FLAG_WINDOW_UNDECORATED | FLAG_WINDOW_ALWAYS_RUN;
   }
   SetConfigFlags(window_flags);
   InitWindow(kInitialWidth, kInitialHeight,
@@ -765,7 +749,6 @@ int main() {
     }
     EndMode2D();
 
-    drawLidarHeadingLabels(camera, regular_font);
     if (ipc_mode) {
       for (const auto &entry : live_people) {
         const LivePerson &person = entry.second;

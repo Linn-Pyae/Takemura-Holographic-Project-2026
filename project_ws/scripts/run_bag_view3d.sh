@@ -13,7 +13,7 @@ set -eo pipefail
 
 WS="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="$(cd "$WS/.." && pwd)"
-VIEWER="$REPO/Test/view.py"
+VIEWER="$WS/scripts/view3d.py"
 SRC_TOPIC="/velodyne_points_wifi"
 PLAY_TOPIC="/velodyne_points_bag"
 PLAY_DOMAIN="${ROS_DOMAIN_ID:-42}"
@@ -86,5 +86,4 @@ if ! kill -0 "$PLAY_PID" 2>/dev/null; then
   exit 1
 fi
 
-cd "$REPO/Test"
-python -u view.py
+python -u "$VIEWER"
